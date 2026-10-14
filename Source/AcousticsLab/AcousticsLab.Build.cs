@@ -20,6 +20,11 @@ public class AcousticsLab : ModuleRules
 			"AcousticsCore"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { });
+		// GeometryCore / GeometryFramework: UDynamicMeshComponent and FDynamicMesh3 read by the scene extractor.
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"GeometryCore",
+			"GeometryFramework"
+		});
 	}
 }

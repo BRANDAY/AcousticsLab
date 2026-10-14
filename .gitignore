@@ -27,3 +27,7 @@ Plugins/**/Intermediate/
 *.secret
 secrets/
 docs/ENV.local.md
+
+# Ruflo local state (memory databases, hook state)
+.swarm/
+.claude-flow/

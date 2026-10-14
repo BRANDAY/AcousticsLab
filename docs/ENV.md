@@ -9,3 +9,9 @@
 - **Placeholder maps**: `Tools/Editor/create_placeholder_levels.py`, run headless through `UnrealEditor-Cmd.exe -run=pythonscript` (the `PythonScriptPlugin` is enabled for the Editor target only for this reason).
 - **Plugins enabled in M0**: GeometryScripting, ProceduralMeshComponent, EnhancedInput, AudioCapture, ModelingToolsEditorMode (editor), PythonScriptPlugin (editor).
 - **TODO (M9)**: add `SteamAudio` and `AudioTracing` to the `Plugins` list of `AcousticsLab.uproject` (JSON allows no comments, so the reminder lives here).
+
+## Unreal MCP (recorded at M1)
+
+- Plugins `ModelContextProtocol` (server), `AllToolsets` (editor toolsets: scene/actor/object/asset/data-asset tools, automation tests) and `MCPClientToolset` are enabled in `AcousticsLab.uproject`. `.mcp.json` next to the `.uproject` points Claude Code at `http://127.0.0.1:8000/mcp`.
+- The server does not start by itself: launch the editor with `UnrealEditor.exe AcousticsLab.uproject /Game/Maps/Level_Shoebox -ModelContextProtocolStartServer -ModelContextProtocolPort=8000`, or run `ModelContextProtocol.StartServer` in the editor console (or set `bAutoStartServer=True` in Editor Preferences). With tool search on, the MCP surface is `list_toolsets` / `describe_toolset` / `call_tool`; objects are passed as `{"refPath": "/Game/Maps/Level_Shoebox.Level_Shoebox:PersistentLevel.Actor_0"}`, classes as `{"refPath": "/Script/AcousticsLab.ShoeboxRoomActor"}`.
+- Limits seen in 5.8: no tool calls a UFUNCTION (use `ObjectTools.set_properties` with a JSON string), no save-level tool (`AssetTools.save_assets` with `[]` saves every dirty package including the map), Live Coding needs the `LiveCodingToolset` plugin (not part of `AllToolsets`). `Build.bat` cannot link while an editor has the project open.
