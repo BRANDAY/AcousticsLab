@@ -1,0 +1,28 @@
+# Unreal Engine build/cache output
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+Build/
+.vs/
+.idea/
+*.sln
+*.VC.db
+*.opensdf
+*.opendb
+*.sdf
+*.suo
+*.xcworkspace
+*.xcodeproj
+
+# Plugin build output
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.secret
+secrets/
+docs/ENV.local.md
