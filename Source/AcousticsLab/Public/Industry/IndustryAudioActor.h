@@ -34,19 +34,22 @@ struct FIndustryComponentSpec
 };
 
 /**
- * One per industry level (SPEC §3.2 Industry/: SteamAudioLevelSetup and AudioTracingLevelSetup as one class).
+ * One per plugin in each industry level (SPEC §3.2 Industry/: SteamAudioLevelSetup and AudioTracingLevelSetup as one
+ * class); both industry levels hold a Steam Audio and an Audio Tracing actor, the level's own one starts (bAutoPlay).
  *
  * Both plugins want the project's spatialization slot (SPEC §3.1). UE 5.8 keeps every registered spatializer once a
  * default one is configured and switches at runtime (FAudioDevice::SetCurrentSpatializationPlugin), so the project
- * keeps one configuration and this actor selects its plugin's spatializer at BeginPlay and restores the previous one at
- * EndPlay. It owns the plugin-processed audio component (the anechoic clip, routed to the master submix, with the
- * plugin's attenuation asset), follows the acoustic source with SourceId, puts the audio listener on the selected
- * receiver (APlayerController::SetAudioListenerOverride, facing the source) and creates the plugin's runtime components
- * from class paths. The editor button Prepare Level adds the per-mesh plugin components (Steam Audio Geometry, Audio
- * Tracing Sound Material) to every primitive tagged "Acoustic". No compile-time dependency on either plugin.
+ * keeps one configuration and the actor selects its plugin's spatializer whenever its variant is activated; the
+ * spatializer of the level start is restored at EndPlay. It owns the plugin-processed audio component (the anechoic
+ * clip, routed to the master submix, with the plugin's attenuation asset), follows the acoustic source with SourceId,
+ * puts the audio listener on the selected receiver (APlayerController::SetAudioListenerOverride, facing the source) and
+ * creates the plugin's runtime components from class paths. The editor button Prepare Level adds the per-mesh plugin
+ * components (Steam Audio Geometry, Audio Tracing Sound Material) to every primitive tagged "Acoustic". No compile-time
+ * dependency on either plugin.
  *
- * A/B (SPEC §3.7): VariantKey (5 = Steam Audio, 6 = Audio Tracing) plays the plugin source and stops the convolution
- * clip of UAuralizationComponent; keys 1-4 stop the plugin source and hand playback back to the auralization component.
+ * A/B (SPEC §3.7): key 5 = Steam Audio, 6 = Audio Tracing switch between the plugins at runtime (the other plugin's
+ * source stops, the spatializer follows) and stop the convolution clip of UAuralizationComponent; keys 1-4 stop the
+ * plugin source and hand playback back to the auralization component.
  */
 UCLASS(HideCategories = (Rendering, Replication, Collision, Input, HLOD, LOD, Cooking, Physics, Networking))
 class ACOUSTICSLAB_API AIndustryAudioActor : public AActor
@@ -90,7 +93,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Acoustics|Playback")
 	FName ListenerReceiverId = TEXT("R1");
 
-	/** Start the plugin variant when the level starts. */
+	/** Start the plugin variant when the level starts (the level's own plugin; the other one waits for its key). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Acoustics|Playback")
 	bool bAutoPlay = true;
 
@@ -128,7 +131,7 @@ public:
 	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Acoustics|Industry")
 	int32 PrepareLevel();
 
-	/** Plays the plugin source (and stops the convolution clip); keys 5 / 6. */
+	/** Selects the plugin's spatializer and plays its source; stops the other industry actor's source. Keys 5 / 6. */
 	UFUNCTION(BlueprintCallable, Category = "Acoustics|Industry")
 	void ActivatePluginVariant();
 
@@ -144,10 +147,11 @@ public:
 	bool SetListenerReceiver(FName ReceiverId);
 
 	/**
-	 * A/B key from the player controller: VariantKey activates the plugin source, other keys deactivate it and return
-	 * false so the auralization component handles them; the other industry key is reported as not available here.
+	 * A/B key from the player controller. Keys 5 / 6 activate the industry actor with that VariantKey (switching the
+	 * plugin at runtime) and return true; keys 1-4 stop any plugin source and return false so the auralization component
+	 * handles them. Returns false when the world has no industry actor.
 	 */
-	bool HandleVariantKey(int32 Key, UAuralizationComponent* Auralization);
+	static bool HandleVariantKeyInWorld(UWorld* World, int32 Key, UAuralizationComponent* Auralization);
 
 	/** Spatializer requested / active, ray-tracing state (Audio Tracing), listener receiver, playback; for the HUD and the log. */
 	UFUNCTION(BlueprintPure, Category = "Acoustics|Industry")
@@ -156,8 +160,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Acoustics|Industry")
 	FString GetPluginDisplayName() const;
 
-	/** The industry actor of the world, nullptr outside the industry levels. */
+	/** The active industry actor of the world (else the level's own one, bAutoPlay), nullptr outside the industry levels. */
 	static AIndustryAudioActor* Find(UWorld* World);
+
+	/** Every industry actor of the world, ordered by VariantKey. */
+	static TArray<AIndustryAudioActor*> FindAll(UWorld* World);
 
 	/** Creates one component from a spec on Owner (registered, attached to Parent when given); nullptr when the class is missing. */
 	static UActorComponent* CreateComponentFromSpec(AActor* Owner, const FIndustryComponentSpec& Spec, USceneComponent* Parent, bool bInstanceComponent, FString& OutError);
@@ -177,7 +184,8 @@ private:
 	UFUNCTION()
 	void HandleClipFinished();
 
-	FName PreviousSpatializer;
+	/** Device spatializer when the level started; restored at EndPlay. */
+	FName LevelStartSpatializer;
 	FName ActiveSpatializer;
 	bool bSpatializerSelected = false;
 	bool bPluginVariantActive = false;

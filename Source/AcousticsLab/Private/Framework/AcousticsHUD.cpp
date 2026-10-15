@@ -37,11 +37,15 @@ void AAcousticsHUD::DrawHUD()
 
 	DrawText(Line1, FLinearColor::White, 24.f, 24.f, GEngine->GetMediumFont());
 	DrawText(Line2, FLinearColor(0.75f, 0.75f, 0.75f), 24.f, 48.f, GEngine->GetSmallFont());
-	// Industry levels (M9): the plugin key and its state (spatializer, ray tracing, listener receiver).
+	// Industry levels (M9): the plugin keys (switch at runtime) and the active plugin's state (spatializer, ray tracing, listener).
 	if (const AIndustryAudioActor* Industry = AIndustryAudioActor::Find(GetWorld()))
 	{
-		const FString Line3 = FString::Printf(TEXT("%d: %s (plugin source, listener at a receiver: console Acoustics.Industry.Receiver R1..R4)   |   %s"),
-			Industry->VariantKey, *Industry->GetPluginDisplayName(), *Industry->DescribeState());
+		FString Keys;
+		for (const AIndustryAudioActor* Actor : AIndustryAudioActor::FindAll(GetWorld()))
+		{
+			Keys += FString::Printf(TEXT("%d: %s  "), Actor->VariantKey, *Actor->GetPluginDisplayName());
+		}
+		const FString Line3 = FString::Printf(TEXT("%s(plugin switch; listener: console Acoustics.Industry.Receiver R1..R4)   |   %s"), *Keys, *Industry->DescribeState());
 		DrawText(Line3, FLinearColor(1.0f, 0.85f, 0.4f), 24.f, 66.f, GEngine->GetSmallFont());
 	}
 }

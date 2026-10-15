@@ -16,11 +16,12 @@ Phases (default: all, in this order): assets, amphitheatre, steam, tracing.
                 ATT_AudioTracing attenuation.
   amphitheatre  /Game/Maps/Level_Amphitheatre: arena floor stand-in (the cavea is M10), source S1, receivers R1..R4,
                 LevelSetup.Positions = DA_AmphitheatrePositions (positions applied).
-  steam         /Game/Maps/Level_Amphitheatre_SteamAudio = copy of Level_Amphitheatre + IndustryAudioActor (Steam Audio,
-                key 5) + Steam Audio Geometry on every "Acoustic" mesh + static geometry exported to
-                /Game/Industry/SteamAudio/SAG_Level_Amphitheatre_SteamAudio.
-  tracing       /Game/Maps/Level_Amphitheatre_AudioTracing = copy of Level_Amphitheatre + IndustryAudioActor (Audio
-                Tracing, key 6) + Audio Tracing Sound Material on every "Acoustic" mesh.
+  steam         /Game/Maps/Level_Amphitheatre_SteamAudio = copy of Level_Amphitheatre + both industry actors (Steam
+                Audio key 5, starts; Audio Tracing key 6) + Steam Audio Geometry and Audio Tracing Sound Material on
+                every "Acoustic" mesh + static geometry exported to /Game/Industry/SteamAudio/SAG_<level>.
+  tracing       /Game/Maps/Level_Amphitheatre_AudioTracing = the same with Audio Tracing starting.
+
+Keys 5 / 6 switch between the plugins at runtime in both levels (AIndustryAudioActor::HandleVariantKeyInWorld).
 
 Rerun after M10 replaces the amphitheatre geometry: the industry levels are rebuilt from Level_Amphitheatre.
 Existing assets are reused and their settings re-applied.
@@ -292,15 +293,12 @@ def configure_setup(kind, display_name):
     setup.set_editor_property("display_name", display_name)
 
 
-def setup_steam_level():
-    if not hasattr(unreal, "SteamAudioMaterial"):
-        unreal.log_warning("M9 content: Steam Audio plugin not loaded, Level_Amphitheatre_SteamAudio skipped")
-        return
-    copy_amphitheatre(STEAM_LEVEL)
-    configure_setup(unreal.AcousticLevelKind.INDUSTRY_STEAM_AUDIO, "2.1 Steam Audio (Valve)")
+def add_steam_actor(level_name, auto_play):
+    """Steam Audio industry actor (key 5) + Steam Audio Geometry on the Acoustic meshes + static geometry export."""
     industry = spawn("/Script/AcousticsLab.IndustryAudioActor", "IndustrySteamAudio")
     industry.set_editor_property("plugin", unreal.IndustryPlugin.STEAM_AUDIO)
     industry.set_editor_property("variant_key", 5)
+    industry.set_editor_property("auto_play", auto_play)
     industry.set_editor_property("spatialization_plugin_name", STEAM_SPATIALIZER)
     industry.set_editor_property("clip", unreal.load_asset(CLIP_MASTER))
     if asset_library.does_asset_exist(CLICK):
@@ -319,22 +317,19 @@ def setup_steam_level():
     industry.set_editor_property("mesh_material_property", "Material")
     industry.set_editor_property("materials_by_name", {name: unreal.SoftObjectPath(object_path(f"{STEAM_FOLDER}/SAM_{name}")) for name in PRESETS})
     added = industry.prepare_level()
-    log(f"Steam Audio geometry components added: {added}")
-    geometry = f"{STEAM_FOLDER}/SAG_Level_Amphitheatre_SteamAudio"
+    log(f"{level_name}: Steam Audio geometry components added: {added}")
+    geometry = f"{STEAM_FOLDER}/SAG_{level_name}"
     if not unreal.IndustryLevelLibrary.export_steam_audio_static_geometry(industry, object_path(geometry)):
-        raise RuntimeError("Steam Audio static geometry export failed")
-    if not level_editor.save_current_level():
-        raise RuntimeError("could not save Level_Amphitheatre_SteamAudio")
-    asset_library.save_directory(STEAM_FOLDER, only_if_is_dirty=False, recursive=True)
-    log("Level_Amphitheatre_SteamAudio saved")
+        raise RuntimeError(f"Steam Audio static geometry export failed ({level_name})")
+    return industry
 
 
-def setup_tracing_level():
-    copy_amphitheatre(TRACING_LEVEL)
-    configure_setup(unreal.AcousticLevelKind.INDUSTRY_AUDIO_TRACING, "2.2 Audio Tracing (Pinpoint)")
+def add_tracing_actor(level_name, auto_play):
+    """Audio Tracing industry actor (key 6) + Audio Tracing Sound Material under the Acoustic meshes (when installed)."""
     industry = spawn("/Script/AcousticsLab.IndustryAudioActor", "IndustryAudioTracing")
     industry.set_editor_property("plugin", unreal.IndustryPlugin.AUDIO_TRACING)
     industry.set_editor_property("variant_key", 6)
+    industry.set_editor_property("auto_play", auto_play)
     industry.set_editor_property("spatialization_plugin_name", TRACING_SPATIALIZER)
     industry.set_editor_property("console_variables", {"AudioTracing.HardwareRayTracing.MaxReflectionDepth": TRACING_MAX_REFLECTION_DEPTH})
     industry.set_editor_property("clip", unreal.load_asset(CLIP_MASTER))
@@ -347,12 +342,34 @@ def setup_tracing_level():
     industry.set_editor_property("mesh_material_property", "Material")
     industry.set_editor_property("materials_by_name", {name: unreal.SoftObjectPath(object_path(f"{TRACING_FOLDER}/ATM_{name}")) for name in PRESETS})
     if find_class(TRACING_MATERIAL_COMPONENT) is not None:
-        log(f"Audio Tracing sound material components added: {industry.prepare_level()}")
+        log(f"{level_name}: Audio Tracing sound material components added: {industry.prepare_level()}")
     else:
-        unreal.log_warning("M9 content: Audio Tracing not loaded, the level gets the industry actor only (rerun 'tracing' after installing it)")
+        unreal.log_warning(f"M9 content: Audio Tracing not loaded, {level_name} gets its industry actor without sound materials (rerun 'steam tracing' after installing it)")
+    return industry
+
+
+def setup_industry_level(target, kind, display_name, own_plugin):
+    """Both plugins in each industry level, switched at runtime by keys 5 / 6; the level's own plugin starts."""
+    if not hasattr(unreal, "SteamAudioMaterial"):
+        unreal.log_warning(f"M9 content: Steam Audio plugin not loaded, {target} skipped")
+        return
+    copy_amphitheatre(target)
+    configure_setup(kind, display_name)
+    level_name = target.rsplit("/", 1)[-1]
+    add_steam_actor(level_name, own_plugin == "steam")
+    add_tracing_actor(level_name, own_plugin == "tracing")
     if not level_editor.save_current_level():
-        raise RuntimeError("could not save Level_Amphitheatre_AudioTracing")
-    log("Level_Amphitheatre_AudioTracing saved")
+        raise RuntimeError(f"could not save {level_name}")
+    asset_library.save_directory(STEAM_FOLDER, only_if_is_dirty=False, recursive=True)
+    log(f"{level_name} saved (keys 5 / 6 switch the plugin, {own_plugin} starts)")
+
+
+def setup_steam_level():
+    setup_industry_level(STEAM_LEVEL, unreal.AcousticLevelKind.INDUSTRY_STEAM_AUDIO, "2.1 Steam Audio (Valve)", "steam")
+
+
+def setup_tracing_level():
+    setup_industry_level(TRACING_LEVEL, unreal.AcousticLevelKind.INDUSTRY_AUDIO_TRACING, "2.2 Audio Tracing (Pinpoint)", "tracing")
 
 
 def main(phases):

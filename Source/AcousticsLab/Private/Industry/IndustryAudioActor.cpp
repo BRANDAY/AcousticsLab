@@ -57,11 +57,13 @@ namespace
 		TEXT("Industry levels: put the audio listener on a receiver (R1..R4)."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
 		{
-			if (AIndustryAudioActor* Industry = AIndustryAudioActor::Find(World))
+			AIndustryAudioActor* Industry = AIndustryAudioActor::Find(World);
+			if (Industry && Args.Num() > 0 && Industry->SetListenerReceiver(FName(*Args[0])))
 			{
-				if (Args.Num() > 0)
+				// The other plugin keeps the receiver when it is switched on.
+				for (AIndustryAudioActor* Other : AIndustryAudioActor::FindAll(World))
 				{
-					Industry->SetListenerReceiver(FName(*Args[0]));
+					Other->ListenerReceiverId = Industry->ListenerReceiverId;
 				}
 			}
 		}));
@@ -71,11 +73,12 @@ namespace
 		TEXT("Industry levels: log the plugin, spatializer, ray-tracing and listener state."),
 		FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
 		{
-			if (const AIndustryAudioActor* Industry = AIndustryAudioActor::Find(World))
+			const TArray<AIndustryAudioActor*> Industries = AIndustryAudioActor::FindAll(World);
+			for (const AIndustryAudioActor* Industry : Industries)
 			{
 				UE_LOG(LogAcoustics, Log, TEXT("%s"), *Industry->DescribeState());
 			}
-			else
+			if (Industries.IsEmpty())
 			{
 				UE_LOG(LogAcoustics, Log, TEXT("Industry: no industry actor in this level"));
 			}
@@ -100,12 +103,36 @@ FString AIndustryAudioActor::GetPluginDisplayName() const
 
 AIndustryAudioActor* AIndustryAudioActor::Find(UWorld* World)
 {
-	if (!World)
+	const TArray<AIndustryAudioActor*> Actors = FindAll(World);
+	for (AIndustryAudioActor* Actor : Actors)
 	{
-		return nullptr;
+		if (Actor->bPluginVariantActive)
+		{
+			return Actor;
+		}
 	}
-	TActorIterator<AIndustryAudioActor> It(World);
-	return It ? *It : nullptr;
+	for (AIndustryAudioActor* Actor : Actors)
+	{
+		if (Actor->bAutoPlay)
+		{
+			return Actor;
+		}
+	}
+	return Actors.IsEmpty() ? nullptr : Actors[0];
+}
+
+TArray<AIndustryAudioActor*> AIndustryAudioActor::FindAll(UWorld* World)
+{
+	TArray<AIndustryAudioActor*> Actors;
+	if (World)
+	{
+		for (TActorIterator<AIndustryAudioActor> It(World); It; ++It)
+		{
+			Actors.Add(*It);
+		}
+	}
+	Actors.Sort([](const AIndustryAudioActor& A, const AIndustryAudioActor& B) { return A.VariantKey < B.VariantKey; });
+	return Actors;
 }
 
 UActorComponent* AIndustryAudioActor::CreateComponentFromSpec(AActor* Owner, const FIndustryComponentSpec& Spec, USceneComponent* Parent, bool bInstanceComponent, FString& OutError)
@@ -224,9 +251,9 @@ void AIndustryAudioActor::BeginPlay()
 {
 	Super::BeginPlay();
 	bRayTracingEnabled = IsRayTracingEnabled();
+	LevelStartSpatializer = UGameplayStatics::GetActiveSpatialPluginName(this);
+	ActiveSpatializer = LevelStartSpatializer;
 	FollowSource();
-	SelectSpatializer();
-	ApplyConsoleVariables();
 	CreateRuntimeComponents();
 	if (PluginAudio)
 	{
@@ -245,7 +272,14 @@ void AIndustryAudioActor::BeginPlay()
 	UE_LOG(LogAcoustics, Log, TEXT("%s"), *DescribeState());
 	if (bAutoPlay)
 	{
-		ActivatePluginVariant();
+		// Next tick: every industry actor of the level has recorded the level-start spatializer before the first switch.
+		GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
+		{
+			if (!bPluginVariantActive)
+			{
+				ActivatePluginVariant();
+			}
+		}));
 	}
 }
 
@@ -265,18 +299,19 @@ void AIndustryAudioActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		Controller->ClearAudioListenerOverride();
 	}
-	// The spatializer is a device-wide choice: hand the previous one back (the menu and the Sikora levels expect the default).
-	if (bSpatializerSelected && !PreviousSpatializer.IsNone() && PreviousSpatializer != ActiveSpatializer)
+	// The spatializer is a device-wide choice: hand the level-start one back (the menu and the Sikora levels expect the default).
+	const FName Current = UGameplayStatics::GetActiveSpatialPluginName(this);
+	if (!LevelStartSpatializer.IsNone() && Current != LevelStartSpatializer)
 	{
-		UGameplayStatics::SetActiveSpatialPluginByName(this, PreviousSpatializer);
-		UE_LOG(LogAcoustics, Log, TEXT("Industry %s: spatializer restored to %s"), *GetPluginDisplayName(), *PreviousSpatializer.ToString());
+		UGameplayStatics::SetActiveSpatialPluginByName(this, LevelStartSpatializer);
+		UE_LOG(LogAcoustics, Log, TEXT("Industry %s: spatializer restored to %s"), *GetPluginDisplayName(), *LevelStartSpatializer.ToString());
 	}
 	Super::EndPlay(EndPlayReason);
 }
 
 void AIndustryAudioActor::SelectSpatializer()
 {
-	PreviousSpatializer = UGameplayStatics::GetActiveSpatialPluginName(this);
+	const FName PreviousSpatializer = UGameplayStatics::GetActiveSpatialPluginName(this);
 	ActiveSpatializer = PreviousSpatializer;
 	const TArray<FName> Available = UGameplayStatics::GetAvailableSpatialPluginNames(this);
 	FString List;
@@ -396,6 +431,17 @@ void AIndustryAudioActor::ApplyListener()
 
 void AIndustryAudioActor::ActivatePluginVariant()
 {
+	// One plugin at a time: the device has one active spatializer.
+	for (AIndustryAudioActor* Other : FindAll(GetWorld()))
+	{
+		if (Other != this && Other->bPluginVariantActive)
+		{
+			Other->DeactivatePluginVariant();
+		}
+	}
+	SelectSpatializer();
+	ApplyConsoleVariables();
+	ApplyListener();
 	bPluginVariantActive = true;
 	StartClip();
 }
@@ -448,26 +494,38 @@ void AIndustryAudioActor::HandleClipFinished()
 	}
 }
 
-bool AIndustryAudioActor::HandleVariantKey(int32 Key, UAuralizationComponent* Auralization)
+bool AIndustryAudioActor::HandleVariantKeyInWorld(UWorld* World, int32 Key, UAuralizationComponent* Auralization)
 {
-	if (Key == VariantKey)
+	const TArray<AIndustryAudioActor*> Actors = FindAll(World);
+	if (Actors.IsEmpty())
 	{
-		if (Auralization)
-		{
-			Auralization->Stop();
-		}
-		ActivatePluginVariant();
-		UE_LOG(LogAcoustics, Log, TEXT("Industry %s: A/B variant %d -> plugin source at %s, listener %s"), *GetPluginDisplayName(), Key, *SourceId.ToString(), *ListenerReceiverId.ToString());
-		return true;
+		return false;
 	}
 	if (Key == 5 || Key == 6)
 	{
-		UE_LOG(LogAcoustics, Log, TEXT("Industry: variant %d is not available in this level (%s level: key %d)"), Key, *GetPluginDisplayName(), VariantKey);
+		for (AIndustryAudioActor* Actor : Actors)
+		{
+			if (Actor->VariantKey == Key)
+			{
+				if (Auralization)
+				{
+					Auralization->Stop();
+				}
+				Actor->ActivatePluginVariant();
+				UE_LOG(LogAcoustics, Log, TEXT("Industry %s: A/B variant %d -> plugin source at %s, listener %s"), *Actor->GetPluginDisplayName(), Key, *Actor->SourceId.ToString(),
+					*Actor->ListenerReceiverId.ToString());
+				return true;
+			}
+		}
+		UE_LOG(LogAcoustics, Log, TEXT("Industry: no plugin actor with key %d in this level"), Key);
 		return true;
 	}
-	if (bPluginVariantActive)
+	for (AIndustryAudioActor* Actor : Actors)
 	{
-		DeactivatePluginVariant();
+		if (Actor->bPluginVariantActive)
+		{
+			Actor->DeactivatePluginVariant();
+		}
 	}
 	return false;
 }
@@ -475,7 +533,7 @@ bool AIndustryAudioActor::HandleVariantKey(int32 Key, UAuralizationComponent* Au
 FString AIndustryAudioActor::DescribeState() const
 {
 	FString State = FString::Printf(TEXT("Industry %s (key %d): spatializer %s"), *GetPluginDisplayName(), VariantKey, *ActiveSpatializer.ToString());
-	if (!SpatializationPluginName.IsEmpty() && ActiveSpatializer != FName(*SpatializationPluginName))
+	if (bPluginVariantActive && !SpatializationPluginName.IsEmpty() && ActiveSpatializer != FName(*SpatializationPluginName))
 	{
 		State += FString::Printf(TEXT(" (requested %s: not registered)"), *SpatializationPluginName);
 	}

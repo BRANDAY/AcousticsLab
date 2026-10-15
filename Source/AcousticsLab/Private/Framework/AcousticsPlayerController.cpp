@@ -383,19 +383,16 @@ void AAcousticsPlayerController::OnSelectVariant(const FInputActionValue& Value,
 	SelectedVariant = Variant;
 	const AAcousticSimulationManager* Manager = bIsMainMenu ? nullptr : AAcousticSimulationManager::Find(GetWorld());
 	UAuralizationComponent* Auralization = Manager ? Manager->Auralization.Get() : nullptr;
-	// Industry levels (M9): key 5 / 6 belongs to the level's plugin; the industry actor stops its source for keys 1-4.
-	if (AIndustryAudioActor* Industry = bIsMainMenu ? nullptr : AIndustryAudioActor::Find(GetWorld()))
+	// Industry levels (M9): keys 5 / 6 switch between Steam Audio and Audio Tracing at runtime; keys 1-4 stop the plugin source.
+	if (!bIsMainMenu && AIndustryAudioActor::HandleVariantKeyInWorld(GetWorld(), Variant, Auralization))
 	{
-		if (Industry->HandleVariantKey(Variant, Auralization))
-		{
-			UE_LOG(LogAcoustics, Log, TEXT("A/B variant %d (%s) selected"), Variant, *UAuralizationComponent::VariantName(UAuralizationComponent::VariantFromKey(Variant)));
-			return;
-		}
+		UE_LOG(LogAcoustics, Log, TEXT("A/B variant %d (%s) selected"), Variant, *UAuralizationComponent::VariantName(UAuralizationComponent::VariantFromKey(Variant)));
+		return;
 	}
-	else if (Variant == 5 || Variant == 6)
+	if (Variant == 5 || Variant == 6)
 	{
-		UE_LOG(LogAcoustics, Log, TEXT("A/B variant %d (%s): only in Level_Amphitheatre_%s"), Variant, *UAuralizationComponent::VariantName(UAuralizationComponent::VariantFromKey(Variant)),
-			Variant == 5 ? TEXT("SteamAudio") : TEXT("AudioTracing"));
+		UE_LOG(LogAcoustics, Log, TEXT("A/B variant %d (%s): only in the industry levels (Level_Amphitheatre_SteamAudio / _AudioTracing)"), Variant,
+			*UAuralizationComponent::VariantName(UAuralizationComponent::VariantFromKey(Variant)));
 		return;
 	}
 	const bool bRouted = Auralization && Auralization->SetVariantByKey(Variant);
