@@ -71,13 +71,16 @@ or in the editor: Tools → Session Frontend → Automation → filter `Acoustic
 
 The menu:
 
+![Main menu](docs/guide/img/main_menu.png)
+
+
 ```
 ACOUSTICS LAB
 1. Methods of M. Sikora
    1.1 Image sources & beam tracing - Shoebox        Level_Shoebox
    1.1 Image sources & beam tracing - Amphitheatre   Level_Amphitheatre (placeholder, M10)
    1.2 Beam tracing with refraction                  Level_Refraction
-   1.3 Thread-level parallelization (benchmark)      Level_Shoebox (panel in M7)
+   1.3 Thread-level parallelization (benchmark)      Level_Shoebox, benchmark panel
    1.4 Hybrid beam/ray tracing                       Level_Shoebox (panel in M8)
    1.5 Audio AR soundwalk (optional)                 Level_Amphitheatre (M10)
 2. Industry

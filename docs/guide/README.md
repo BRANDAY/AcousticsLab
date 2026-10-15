@@ -16,7 +16,7 @@ This guide explains, mode by mode, how the methods of prof. Marjan Sikora's pape
 | 6 | [Auralization: IR synthesis, convolution, A/B](06-auralization.md) | listening side of S4–S5 | M4, M5 | done (Dry / Ray / Beam) |
 | 7 | [Image sources and beam tracing with beam division](07-image-sources-and-beam-tracing.md) | **S1**, S2 §3.2–3.3 | M5 | done |
 | 8 | [Beam tracing with refraction: pool and lens](08-refraction.md) | **S2** | M6 | done |
-| 9 | [Thread-level parallelization](09-parallelization.md) | **S3** | M7 | in progress |
+| 9 | [Thread-level parallelization](09-parallelization.md) | **S3** | M7 | done |
 | 10 | [Hybrid beam/ray tracing](10-hybrid.md) | **S4** | M8 | planned |
 | 11 | [Industry comparison: Steam Audio, Audio Tracing](11-industry-comparison.md) | — | M9 | planned |
 | 12 | [Amphitheatre and soundwalk](12-amphitheatre-and-soundwalk.md) | S4, **S5** | M10 | planned |
@@ -27,7 +27,7 @@ The milestone documents in [`docs/milestones/`](../milestones/) hold the develop
 
 ## Validation at a glance
 
-27 automation tests, all green on the M6 build (`AcousticsLab.*`, headless command in [CLAUDE.md](../../CLAUDE.md)).
+30 automation tests, all green on the M7 build (`AcousticsLab.*`, headless command in [CLAUDE.md](../../CLAUDE.md)).
 
 | Test | What it checks | Tolerance / criterion | Page |
 |---|---|---|---|
@@ -57,6 +57,9 @@ The milestone documents in [`docs/milestones/`](../milestones/) hold the develop
 | `Core.Geometry.LeastSquaresApex` | refracted-beam apex fit | 1e-9 | [8](08-refraction.md) |
 | `Core.Solvers.RefractionEnergy` | R + T = 1; child factors; transmitted delay under water | 1e-15; **± 0.1 ms**; energy within 25 % of paraxial estimate | [8](08-refraction.md) |
 | `Core.Solvers.RefractedBeamTreeDeterminism` | pool with refraction: determinism, delays between all-air and all-water | bit-identical | [8](08-refraction.md) |
+| `Core.Solvers.BeamThreadCountInvariance` | beam tree and results for the sequential tracer vs 1 / 2 / 4 / 12 pool threads, with refraction; truncated trees | bit-identical | [9](09-parallelization.md) |
+| `Core.Solvers.BvhToggleInvariance` | BVH on vs brute force for the beam tracer (shoebox, split shoebox, pool) | bit-identical | [9](09-parallelization.md) |
+| `Core.Solvers.BenchmarkMatrix` | benchmark matrix, summary, CSV, cancel | exact | [9](09-parallelization.md) |
 | `Core.Solvers.LensFocus` | S2 lens scaled × 10: focus energy vs off-axis and in front | **focus > 2 × off-axis**, > front | [8](08-refraction.md) |
 
 (All names start with `AcousticsLab.`; `ShoeboxExtraction` and `Visualization.Helpers` live in the game module because they need engine types.)
@@ -67,7 +70,7 @@ The milestone documents in [`docs/milestones/`](../milestones/) hold the develop
 - **No diffraction, no scattering in the beam tracer** (as in S2); the ray tracer has Lambert scattering.
 - **Refracted beam apex**: least-squares point of the three refracted guide rays (S2 uses the mean of the pairwise intersections); R / T at normal incidence for every angle.
 - **Only the beam tracer knows media**; the ray tracer and image sources treat interfaces as walls.
-- **No beam octree** for receiver lookup (linear scan of the tree).
+- **No beam octree** for receiver lookup (linear scan of the tree); the parallel speed-up is limited by the largest root subtree.
 - **Geometry from render data**: works in the editor, PIE and standalone-from-editor; a packaged build would need meshes with CPU access.
 - **Placeholder anechoic clip** (synthetic test signal) until a real anechoic recording is added.
 - Details and the reasons are on each page under "Differences".
