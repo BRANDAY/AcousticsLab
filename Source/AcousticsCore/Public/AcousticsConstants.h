@@ -19,6 +19,17 @@ namespace Acoustics
 	constexpr double DefaultBinSeconds = 0.001;
 	constexpr double DefaultMaxTimeSeconds = 3.0;
 
+	/** Broadband air absorption exponent m in E *= exp(-m d), 1/m (SPEC §2.2.4). */
+	constexpr double DefaultAirAbsorptionPerMeter = 0.002;
+
+	/** Stochastic ray tracing defaults (SPEC §2.2): rays per source, reflection-order limit, energy cut-off relative to E0. */
+	constexpr int32 DefaultNumRays = 20000;
+	constexpr int32 DefaultMaxOrder = 200;
+	constexpr double DefaultEnergyThreshold = 1e-6;
+
+	/** Visualization keeps at most this many ray paths (SPEC §3.5). */
+	constexpr int32 DefaultMaxPathsForVisualization = 2000;
+
 	/** UE works in centimeters, the core in meters; conversion happens only at the module boundary. */
 	constexpr double CentimetersPerMeter = 100.0;
 }

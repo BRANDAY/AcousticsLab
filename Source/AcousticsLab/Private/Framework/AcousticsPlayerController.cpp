@@ -12,11 +12,14 @@
 #include "InputModifiers.h"
 #include "Kismet/GameplayStatics.h"
 #include "Levels/AcousticsLevels.h"
+#include "Simulation/AcousticSimulationManager.h"
 #include "UI/MainMenuWidget.h"
+#include "UI/SimulationHUDWidget.h"
 
 AAcousticsPlayerController::AAcousticsPlayerController()
 {
 	MainMenuWidgetClass = UMainMenuWidget::StaticClass();
+	SimulationHUDWidgetClass = USimulationHUDWidget::StaticClass();
 }
 
 void AAcousticsPlayerController::BeginPlay()
@@ -48,9 +51,9 @@ void AAcousticsPlayerController::BeginPlay()
 	}
 	else
 	{
-		SetInputMode(FInputModeGameOnly());
-		bShowMouseCursor = false;
 		UE_LOG(LogAcoustics, Log, TEXT("Level %s started, mode=%s"), *UGameplayStatics::GetCurrentLevelName(this, true), *LevelMode.ToString());
+		ShowSimulationHUD();
+		SetUIMode(true);
 	}
 }
 
@@ -70,6 +73,7 @@ void AAcousticsPlayerController::SetupInputComponent()
 	Input->BindAction(LookAction, ETriggerEvent::Triggered, this, &AAcousticsPlayerController::OnLook);
 	Input->BindAction(MoveUpAction, ETriggerEvent::Triggered, this, &AAcousticsPlayerController::OnMoveUp);
 	Input->BindAction(MenuAction, ETriggerEvent::Started, this, &AAcousticsPlayerController::OnMenu);
+	Input->BindAction(ToggleUIAction, ETriggerEvent::Started, this, &AAcousticsPlayerController::OnToggleUI);
 	for (int32 Index = 0; Index < VariantActions.Num(); ++Index)
 	{
 		Input->BindAction(VariantActions[Index], ETriggerEvent::Started, this, &AAcousticsPlayerController::OnSelectVariant, Index + 1);
@@ -88,6 +92,8 @@ void AAcousticsPlayerController::BuildInputAssets()
 	MoveUpAction->ValueType = EInputActionValueType::Axis1D;
 	MenuAction = NewObject<UInputAction>(this, TEXT("IA_MainMenu"));
 	MenuAction->ValueType = EInputActionValueType::Boolean;
+	ToggleUIAction = NewObject<UInputAction>(this, TEXT("IA_ToggleUI"));
+	ToggleUIAction->ValueType = EInputActionValueType::Boolean;
 
 	// Maps a key to an action. bSwizzle routes the key to the Y axis (forward), bNegate flips the sign.
 	auto MapAxisKey = [this](UInputAction* Action, const FKey& Key, bool bNegate, bool bSwizzle)
@@ -130,6 +136,7 @@ void AAcousticsPlayerController::BuildInputAssets()
 	}
 
 	MappingContext->MapKey(MenuAction, EKeys::Escape);
+	MappingContext->MapKey(ToggleUIAction, EKeys::Tab);
 
 	// Keys 1-6 are reserved for the A/B variants (SPEC §3.7).
 	constexpr int32 NumVariants = 6;
@@ -165,6 +172,40 @@ void AAcousticsPlayerController::ShowMainMenu()
 	bShowMouseCursor = true;
 }
 
+void AAcousticsPlayerController::ShowSimulationHUD()
+{
+	if (!SimulationHUDWidgetClass)
+	{
+		SimulationHUDWidgetClass = USimulationHUDWidget::StaticClass();
+	}
+	SimulationHUD = CreateWidget<USimulationHUDWidget>(this, SimulationHUDWidgetClass);
+	if (!SimulationHUD)
+	{
+		UE_LOG(LogAcoustics, Error, TEXT("Could not create the simulation HUD widget"));
+		return;
+	}
+	SimulationHUD->SetManager(AAcousticSimulationManager::FindOrSpawn(GetWorld()));
+	SimulationHUD->AddToViewport();
+}
+
+void AAcousticsPlayerController::SetUIMode(bool bEnabled)
+{
+	bUIMode = bEnabled;
+	if (bEnabled)
+	{
+		FInputModeGameAndUI InputMode;
+		InputMode.SetHideCursorDuringCapture(false);
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		SetInputMode(InputMode);
+		bShowMouseCursor = true;
+	}
+	else
+	{
+		SetInputMode(FInputModeGameOnly());
+		bShowMouseCursor = false;
+	}
+}
+
 void AAcousticsPlayerController::ReturnToMainMenu()
 {
 	UGameplayStatics::OpenLevel(this, FName(*AcousticsLevels::MapPath(AcousticsLevels::MainMenu)));
@@ -180,9 +221,21 @@ void AAcousticsPlayerController::OnMove(const FInputActionValue& Value)
 
 void AAcousticsPlayerController::OnLook(const FInputActionValue& Value)
 {
+	if (bUIMode)
+	{
+		return; // the mouse belongs to the panel
+	}
 	if (AAcousticsExplorerPawn* Explorer = Cast<AAcousticsExplorerPawn>(GetPawn()))
 	{
 		Explorer->Look(Value.Get<FVector2D>());
+	}
+}
+
+void AAcousticsPlayerController::OnToggleUI(const FInputActionValue& Value)
+{
+	if (!bIsMainMenu)
+	{
+		SetUIMode(!bUIMode);
 	}
 }
 
