@@ -16,6 +16,7 @@
 #include "Simulation/AcousticSimulationManager.h"
 #include "UI/MainMenuWidget.h"
 #include "UI/BenchmarkWidget.h"
+#include "UI/CompareWidget.h"
 #include "UI/SimulationHUDWidget.h"
 
 AAcousticsPlayerController::AAcousticsPlayerController()
@@ -23,6 +24,7 @@ AAcousticsPlayerController::AAcousticsPlayerController()
 	MainMenuWidgetClass = UMainMenuWidget::StaticClass();
 	SimulationHUDWidgetClass = USimulationHUDWidget::StaticClass();
 	BenchmarkWidgetClass = UBenchmarkWidget::StaticClass();
+	CompareWidgetClass = UCompareWidget::StaticClass();
 }
 
 void AAcousticsPlayerController::BeginPlay()
@@ -60,6 +62,15 @@ void AAcousticsPlayerController::BeginPlay()
 		{
 			ShowBenchmarkPanel(true); // menu 1.3 (SPEC §0, §2.7)
 		}
+		else if (LevelMode == FName(TEXT("Hybrid")) || LevelMode == FName(TEXT("Compare")))
+		{
+			// Menu 1.4 / 3 (SPEC §0, §2.8): the comparison panel with the hybrid solver.
+			if (AAcousticSimulationManager* Manager = AAcousticSimulationManager::FindOrSpawn(GetWorld()))
+			{
+				Manager->Solver = EAcousticSolver::Hybrid;
+			}
+			ShowComparePanel(true);
+		}
 		SetUIMode(true);
 	}
 }
@@ -82,6 +93,7 @@ void AAcousticsPlayerController::SetupInputComponent()
 	Input->BindAction(MenuAction, ETriggerEvent::Started, this, &AAcousticsPlayerController::OnMenu);
 	Input->BindAction(ToggleUIAction, ETriggerEvent::Started, this, &AAcousticsPlayerController::OnToggleUI);
 	Input->BindAction(ToggleBenchmarkAction, ETriggerEvent::Started, this, &AAcousticsPlayerController::OnToggleBenchmark);
+	Input->BindAction(ToggleCompareAction, ETriggerEvent::Started, this, &AAcousticsPlayerController::OnToggleCompare);
 	for (int32 Index = 0; Index < VariantActions.Num(); ++Index)
 	{
 		Input->BindAction(VariantActions[Index], ETriggerEvent::Started, this, &AAcousticsPlayerController::OnSelectVariant, Index + 1);
@@ -104,6 +116,8 @@ void AAcousticsPlayerController::BuildInputAssets()
 	ToggleUIAction->ValueType = EInputActionValueType::Boolean;
 	ToggleBenchmarkAction = NewObject<UInputAction>(this, TEXT("IA_ToggleBenchmark"));
 	ToggleBenchmarkAction->ValueType = EInputActionValueType::Boolean;
+	ToggleCompareAction = NewObject<UInputAction>(this, TEXT("IA_ToggleCompare"));
+	ToggleCompareAction->ValueType = EInputActionValueType::Boolean;
 
 	// Maps a key to an action. bSwizzle routes the key to the Y axis (forward), bNegate flips the sign.
 	auto MapAxisKey = [this](UInputAction* Action, const FKey& Key, bool bNegate, bool bSwizzle)
@@ -148,6 +162,7 @@ void AAcousticsPlayerController::BuildInputAssets()
 	MappingContext->MapKey(MenuAction, EKeys::Escape);
 	MappingContext->MapKey(ToggleUIAction, EKeys::Tab);
 	MappingContext->MapKey(ToggleBenchmarkAction, EKeys::B);
+	MappingContext->MapKey(ToggleCompareAction, EKeys::H);
 
 	// Keys 1-6 are reserved for the A/B variants (SPEC §3.7).
 	constexpr int32 NumVariants = 6;
@@ -223,9 +238,62 @@ void AAcousticsPlayerController::ShowBenchmarkPanel(bool bShow)
 	{
 		BenchmarkPanel->SetVisibility(bShow ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 	}
+	if (bShow && ComparePanel)
+	{
+		ComparePanel->SetVisibility(ESlateVisibility::Collapsed);
+	}
 	if (SimulationHUD)
 	{
 		SimulationHUD->SetVisibility(bShow ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
+	}
+}
+
+void AAcousticsPlayerController::ShowComparePanel(bool bShow)
+{
+	if (bIsMainMenu)
+	{
+		return;
+	}
+	if (bShow && !ComparePanel)
+	{
+		if (!CompareWidgetClass)
+		{
+			CompareWidgetClass = UCompareWidget::StaticClass();
+		}
+		ComparePanel = CreateWidget<UCompareWidget>(this, CompareWidgetClass);
+		if (!ComparePanel)
+		{
+			UE_LOG(LogAcoustics, Error, TEXT("Could not create the comparison panel"));
+			return;
+		}
+		ComparePanel->SetMode(LevelMode);
+		ComparePanel->SetManager(AAcousticSimulationManager::FindOrSpawn(GetWorld()));
+		ComparePanel->AddToViewport(1);
+	}
+	if (ComparePanel)
+	{
+		ComparePanel->SetVisibility(bShow ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	}
+	if (bShow && BenchmarkPanel)
+	{
+		BenchmarkPanel->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	if (SimulationHUD)
+	{
+		SimulationHUD->SetVisibility(bShow ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
+	}
+}
+
+bool AAcousticsPlayerController::IsComparePanelShown() const
+{
+	return ComparePanel && ComparePanel->GetVisibility() != ESlateVisibility::Collapsed;
+}
+
+void AAcousticsPlayerController::OnToggleCompare(const FInputActionValue& Value)
+{
+	if (!bIsMainMenu)
+	{
+		ShowComparePanel(!IsComparePanelShown());
 	}
 }
 

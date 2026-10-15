@@ -28,11 +28,11 @@ void AAcousticsHUD::DrawHUD()
 	const FString Mode = Controller->LevelMode.IsNone() ? FString(TEXT("default")) : Controller->LevelMode.ToString();
 	const FString Variant = Controller->SelectedVariant > 0
 		? FString::Printf(TEXT("%d (%s)"), Controller->SelectedVariant, *UAuralizationComponent::VariantName(UAuralizationComponent::VariantFromKey(Controller->SelectedVariant)))
-		: FString(TEXT("none (1 = Dry, 2 = Ray, 3 = Beam)"));
+		: FString(TEXT("none (1 = Dry, 2 = Ray, 3 = Beam, 4 = Hybrid)"));
 	const FString Line1 = FString::Printf(TEXT("%s   |   mode: %s   |   A/B variant: %s"), *Title, *Mode, *Variant);
 	const FString Line2 = Controller->IsUIMode()
-		? TEXT("Cursor mode: edit the simulation panel, WASD still flies   Tab: fly mode   1: Dry  2: Ray  3: Beam (convolution)   B: benchmark panel   Esc: main menu")
-		: TEXT("WASD + mouse: fly   Q/E: down/up   Tab: cursor mode (panel)   1: Dry  2: Ray  3: Beam (convolution)   B: benchmark panel   Esc: main menu");
+		? TEXT("Cursor mode: edit the panel, WASD still flies   Tab: fly mode   1: Dry  2: Ray  3: Beam  4: Hybrid (convolution)   B: benchmark   H: compare panel   Esc: main menu")
+		: TEXT("WASD + mouse: fly   Q/E: down/up   Tab: cursor mode (panel)   1: Dry  2: Ray  3: Beam  4: Hybrid (convolution)   B: benchmark   H: compare panel   Esc: main menu");
 
 	DrawText(Line1, FLinearColor::White, 24.f, 24.f, GEngine->GetMediumFont());
 	DrawText(Line2, FLinearColor(0.75f, 0.75f, 0.75f), 24.f, 48.f, GEngine->GetSmallFont());

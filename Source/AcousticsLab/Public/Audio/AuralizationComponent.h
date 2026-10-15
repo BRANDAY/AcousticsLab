@@ -13,7 +13,7 @@ class USoundSubmix;
 class USubmixEffectConvolutionReverbPreset;
 struct FSimulationResult;
 
-/** A/B variants of SPEC §3.7, numbered like the keys 1-6. Dry, Ray (M4) and Beam (M5) have a signal path. */
+/** A/B variants of SPEC §3.7, numbered like the keys 1-6. Dry, Ray (M4), Beam (M5) and Hybrid (M8) have a signal path. */
 UENUM(BlueprintType)
 enum class EAuralizationVariant : uint8
 {
@@ -179,7 +179,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Acoustics|Auralization")
 	void SetVariant(EAuralizationVariant NewVariant);
 
-	/** Key 1 = Dry, 2 = Ray, 3 = Beam (each needs a result of its solver); 4-6 have no solver yet and leave the routing alone (false). */
+	/** Key 1 = Dry, 2 = Ray, 3 = Beam, 4 = Hybrid (each needs a result of its solver); 5-6 have no solver yet and leave the routing alone (false). */
 	UFUNCTION(BlueprintCallable, Category = "Acoustics|Auralization")
 	bool SetVariantByKey(int32 Key);
 
@@ -187,7 +187,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Acoustics|Auralization")
 	bool HasVariantResult(EAuralizationVariant InVariant) const { return VariantSets.Contains(InVariant); }
 
-	/** Variant a solver result feeds: RayTracer -> Ray, BeamTracer -> Beam, others -> None (not auralized). */
+	/** Variant a solver result feeds: RayTracer -> Ray, BeamTracer* -> Beam, Hybrid* -> Hybrid, others -> None (not auralized). */
 	static EAuralizationVariant VariantForSolver(const FString& InSolverName);
 
 	UFUNCTION(BlueprintCallable, Category = "Acoustics|Auralization")

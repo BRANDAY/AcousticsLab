@@ -17,6 +17,7 @@
 #include "Scene/ReceiverGrid.h"
 #include "Simulation/AcousticSimulationSubsystem.h"
 #include "Solvers/BeamTracer.h"
+#include "Solvers/HybridTracer.h"
 #include "Solvers/ImageSourceSolver.h"
 #include "Solvers/RayTracer.h"
 #include "Visualization/BeamVisualizerComponent.h"
@@ -36,7 +37,7 @@ AAcousticSimulationManager::AAcousticSimulationManager()
 
 EAcousticSolver AAcousticSimulationManager::GetEffectiveSolver() const
 {
-	return Solver == EAcousticSolver::Hybrid ? EAcousticSolver::RayTracer : Solver;
+	return Solver;
 }
 
 void AAcousticSimulationManager::BeginPlay()
@@ -420,11 +421,14 @@ bool AAcousticSimulationManager::Run()
 	FBeamTracerSettings BeamTracerSettings = Settings.ToBeamTracerSettings();
 	FString SourceNote;
 	ApplySourceToBeamSettings(*Scene, BeamTracerSettings, SourceNote);
+	FHybridTracerSettings HybridSettings = Settings.ToHybridTracerSettings();
+	HybridSettings.Beam = BeamTracerSettings; // source medium; the hybrid itself switches refraction and directivity off
 	bool bValid = true;
 	switch (Effective)
 	{
 	case EAcousticSolver::ImageSource: bValid = ImageSourceSettings.Validate(Error); break;
 	case EAcousticSolver::BeamTracer: bValid = BeamTracerSettings.Validate(Error); break;
+	case EAcousticSolver::Hybrid: bValid = HybridSettings.Validate(Error); break;
 	default: bValid = RayTracerSettings.Validate(Error); break;
 	}
 	if (!bValid)
@@ -436,15 +440,24 @@ bool AAcousticSimulationManager::Run()
 	SceneForTask = Scene;
 	ProgressState = MakeShared<FSolverProgress>();
 	PendingResult = MakeShared<FSimulationResult>();
+	PendingHybrid = Effective == EAcousticSolver::Hybrid ? TSharedPtr<FHybridResult>(MakeShared<FHybridResult>()) : TSharedPtr<FHybridResult>();
 	++RunCount;
 
 	TSharedPtr<FSolverProgress> Progress_ = ProgressState;
 	TSharedPtr<FSimulationResult> Result = PendingResult;
+	TSharedPtr<FHybridResult> HybridOut = PendingHybrid;
 	Task = UE::Tasks::Launch(UE_SOURCE_LOCATION,
-		[Scene, Source, Receivers = MoveTemp(Receivers), Effective, RayTracerSettings, ImageSourceSettings, BeamTracerSettings, Progress_, Result]()
+		[Scene, Source, Receivers = MoveTemp(Receivers), Effective, RayTracerSettings, ImageSourceSettings, BeamTracerSettings, HybridSettings, Progress_, Result, HybridOut]()
 		{
 			switch (Effective)
 			{
+			case EAcousticSolver::Hybrid:
+				// The three results stay shared (compare panel); PendingResult only carries the failure / cancel state.
+				*HybridOut = FHybridTracer::Run(*Scene, Source, Receivers, HybridSettings, Progress_.Get());
+				Result->SolverName = FHybridTracer::Name();
+				Result->bCancelled = HybridOut->Hybrid.IsValid() && HybridOut->Hybrid->bCancelled;
+				Result->Error = HybridOut->Hybrid.IsValid() ? HybridOut->Hybrid->Error : TEXT("no hybrid result");
+				break;
 			case EAcousticSolver::ImageSource:
 				*Result = FImageSourceSolver::Run(*Scene, Source, Receivers, ImageSourceSettings, Progress_.Get());
 				break;
@@ -472,6 +485,7 @@ bool AAcousticSimulationManager::Run()
 	{
 	case EAcousticSolver::ImageSource: Activity = FString::Printf(TEXT("Image sources up to order %d..."), Settings.ImageSourceOrder); break;
 	case EAcousticSolver::BeamTracer: Activity = FString::Printf(TEXT("Tracing %d beams up to order %d%s..."), FBeamTracerSettings::NumRootBeams(Settings.SubdivisionLevel), Settings.MaxBeamOrder, BeamTracerSettings.bRefraction && Scene->HasInterfaces() ? TEXT(" with refraction") : TEXT("")); break;
+	case EAcousticSolver::Hybrid: Activity = FString::Printf(TEXT("Hybrid: %d beams up to order %d (t_mix %.0f ms), then %d rays..."), FBeamTracerSettings::NumRootBeams(Settings.SubdivisionLevel), HybridSettings.K, HybridSettings.MixingTimeSeconds * 1000.0, Settings.NumRays); break;
 	default: Activity = FString::Printf(TEXT("Tracing %d rays..."), Settings.NumRays); break;
 	}
 	SetState(ESimulationState::Running, Activity + SolverNote);
@@ -518,6 +532,13 @@ void AAcousticSimulationManager::FinishRun()
 {
 	RunEndSeconds = FPlatformTime::Seconds();
 	LastResult = PendingResult;
+	TSharedPtr<const FHybridResult> Hybrid = PendingHybrid;
+	PendingHybrid.Reset();
+	if (Hybrid.IsValid() && Hybrid->IsValid() && Hybrid->Hybrid->bSuccess)
+	{
+		LastResult = Hybrid->Hybrid;
+		LastHybridResult = Hybrid;
+	}
 	ReceiverBindings = MoveTemp(PendingBindings);
 	PendingBindings.Reset();
 	PendingResult.Reset();
@@ -536,6 +557,10 @@ void AAcousticSimulationManager::FinishRun()
 		if (UAcousticSimulationSubsystem* Subsystem = UAcousticSimulationSubsystem::Get(this))
 		{
 			Subsystem->StoreResult(UGameplayStatics::GetCurrentLevelName(this, true), Solver, LastResult);
+			if (LastHybridResult.IsValid() && LastResult == LastHybridResult->Hybrid)
+			{
+				Subsystem->StoreHybridResult(UGameplayStatics::GetCurrentLevelName(this, true), LastHybridResult);
+			}
 		}
 		SetState(ESimulationState::Finished, FString::Printf(TEXT("Done in %.2f s"), LastResult->Timing.TotalSeconds));
 	}
@@ -550,7 +575,19 @@ void AAcousticSimulationManager::FinishRun()
 	UpdateVisualizers();
 	if (Auralization)
 	{
-		Auralization->SetResult(LastResult->bSuccess ? LastResult : nullptr, GetPointReceiverIndices(), UGameplayStatics::GetCurrentLevelName(this, true), LastResult->SolverName);
+		const FString LevelName = UGameplayStatics::GetCurrentLevelName(this, true);
+		if (LastResult->bSuccess && LastHybridResult.IsValid() && LastResult == LastHybridResult->Hybrid)
+		{
+			// One hybrid run feeds three A/B variants (SPEC 3.7): 2 = pure ray, 3 = pure beam (<= K), 4 = hybrid (heard last).
+			const TArray<int32> Points = GetPointReceiverIndices();
+			Auralization->SetResult(LastHybridResult->PureRay, Points, LevelName, LastHybridResult->PureRay->SolverName);
+			Auralization->SetResult(LastHybridResult->PureBeam, Points, LevelName, FString::Printf(TEXT("BeamTracerK%d"), LastHybridResult->K));
+			Auralization->SetResult(LastResult, Points, LevelName, TEXT("Hybrid"));
+		}
+		else
+		{
+			Auralization->SetResult(LastResult->bSuccess ? LastResult : nullptr, GetPointReceiverIndices(), LevelName, LastResult->SolverName);
+		}
 	}
 	OnResultReady.Broadcast(this, *LastResult);
 }

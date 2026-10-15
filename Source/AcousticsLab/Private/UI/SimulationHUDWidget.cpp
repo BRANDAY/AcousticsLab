@@ -24,6 +24,7 @@
 #include "Simulation/AcousticSimulationManager.h"
 #include "Simulation/AcousticSimulationSubsystem.h"
 #include "Solvers/BeamTracer.h"
+#include "Solvers/HybridTracer.h"
 #include "Styling/CoreStyle.h"
 #include "UI/HeatmapLegendWidget.h"
 #include "UI/IRPlotWidget.h"
@@ -49,6 +50,8 @@ namespace
 	const FName FieldImageOrder(TEXT("ImageOrder"));
 	const FName FieldBeamSubdiv(TEXT("BeamSubdiv"));
 	const FName FieldBeamOrder(TEXT("BeamOrder"));
+	const FName FieldHybridK(TEXT("HybridK"));
+	const FName FieldHybridMix(TEXT("HybridMixMs"));
 
 	const FLinearColor PanelColor(0.02f, 0.025f, 0.035f, 0.85f);
 	const FLinearColor LabelColor(0.75f, 0.75f, 0.8f);
@@ -84,7 +87,7 @@ USimulationHUDWidget::USimulationHUDWidget(const FObjectInitializer& ObjectIniti
 
 TArray<FName> USimulationHUDWidget::SettingFieldIds()
 {
-	return { FieldNumRays, FieldMaxOrder, FieldSeed, FieldReceiverRadius, FieldBinMs, FieldTMax, FieldAirAbsorption, FieldNumThreads, FieldWallAlpha, FieldDrawOrder, FieldImageOrder, FieldBeamSubdiv, FieldBeamOrder };
+	return { FieldNumRays, FieldMaxOrder, FieldSeed, FieldReceiverRadius, FieldBinMs, FieldTMax, FieldAirAbsorption, FieldNumThreads, FieldWallAlpha, FieldDrawOrder, FieldImageOrder, FieldBeamSubdiv, FieldBeamOrder, FieldHybridK, FieldHybridMix };
 }
 
 void USimulationHUDWidget::SetManager(AAcousticSimulationManager* InManager)
@@ -185,6 +188,10 @@ void USimulationHUDWidget::NativeConstruct()
 	if (BeamButton)
 	{
 		BeamButton->OnClicked.AddUniqueDynamic(this, &USimulationHUDWidget::HandleBeamClicked);
+	}
+	if (HybridButton)
+	{
+		HybridButton->OnClicked.AddUniqueDynamic(this, &USimulationHUDWidget::HandleHybridClicked);
 	}
 	if (SolverCombo)
 	{
@@ -562,9 +569,10 @@ void USimulationHUDWidget::BuildAuralizationBlock(UVerticalBox* Column)
 	DryButton = MakeButton(TEXT("DryButton"), LOCTEXT("DryVariant", "1: Dry"), ButtonColor);
 	RayButton = MakeButton(TEXT("RayButton"), LOCTEXT("RayVariant", "2: Ray"), ButtonColor);
 	BeamButton = MakeButton(TEXT("BeamButton"), LOCTEXT("BeamVariant", "3: Beam"), ButtonColor);
+	HybridButton = MakeButton(TEXT("HybridButton"), LOCTEXT("HybridVariant", "4: Hybrid"), ButtonColor);
 	PlayClipButton = MakeButton(TEXT("PlayClipButton"), LOCTEXT("PlayClip", "Play"), FLinearColor(0.15f, 0.4f, 0.2f));
 	StopClipButton = MakeButton(TEXT("StopClipButton"), LOCTEXT("StopClip", "Stop"), FLinearColor(0.4f, 0.15f, 0.15f));
-	for (UButton* Button : { DryButton.Get(), RayButton.Get(), BeamButton.Get(), PlayClipButton.Get(), StopClipButton.Get() })
+	for (UButton* Button : { DryButton.Get(), RayButton.Get(), BeamButton.Get(), HybridButton.Get(), PlayClipButton.Get(), StopClipButton.Get() })
 	{
 		if (UHorizontalBoxSlot* ButtonSlot = Row->AddChildToHorizontalBox(Button))
 		{
@@ -586,7 +594,7 @@ void USimulationHUDWidget::BuildSettingsRows()
 		return;
 	}
 	SettingsBox->ClearChildren();
-	for (const FName& Id : { FieldNumRays, FieldMaxOrder, FieldSeed, FieldReceiverRadius, FieldBinMs, FieldTMax, FieldNumThreads, FieldWallAlpha, FieldAirAbsorption, FieldImageOrder, FieldBeamSubdiv, FieldBeamOrder })
+	for (const FName& Id : { FieldNumRays, FieldMaxOrder, FieldSeed, FieldReceiverRadius, FieldBinMs, FieldTMax, FieldNumThreads, FieldWallAlpha, FieldAirAbsorption, FieldImageOrder, FieldBeamSubdiv, FieldBeamOrder, FieldHybridK, FieldHybridMix })
 	{
 		Fields.Remove(Id);
 	}
@@ -663,6 +671,8 @@ void USimulationHUDWidget::BuildSettingsRows()
 		{ FieldImageOrder, LOCTEXT("ImageOrder", "Image sources: order (<= 3)") },
 		{ FieldBeamSubdiv, LOCTEXT("BeamSubdiv", "Beams: subdivision (0=20, 2=320, 6=81920)") },
 		{ FieldBeamOrder, LOCTEXT("BeamOrder", "Beams: max order") },
+		{ FieldHybridK, LOCTEXT("HybridK", "Hybrid: beams up to order K") },
+		{ FieldHybridMix, LOCTEXT("HybridMix", "Hybrid: t_mix, ms") },
 		{ FieldReceiverRadius, LOCTEXT("ReceiverRadius", "Receiver r, m (0 = own)") },
 		{ FieldBinMs, LOCTEXT("BinMs", "Bin, ms") },
 		{ FieldTMax, LOCTEXT("TMax", "T max, s") },
@@ -953,9 +963,14 @@ void USimulationHUDWidget::HandleBeamClicked()
 	SelectVariant(3);
 }
 
+void USimulationHUDWidget::HandleHybridClicked()
+{
+	SelectVariant(4);
+}
+
 TArray<EAcousticSolver> USimulationHUDWidget::SolverOptions()
 {
-	return { EAcousticSolver::RayTracer, EAcousticSolver::ImageSource, EAcousticSolver::BeamTracer };
+	return { EAcousticSolver::RayTracer, EAcousticSolver::ImageSource, EAcousticSolver::BeamTracer, EAcousticSolver::Hybrid };
 }
 
 UImageSourceVisualizerComponent* USimulationHUDWidget::GetImageSourceVisualizer() const
@@ -1092,6 +1107,11 @@ void USimulationHUDWidget::RefreshAuralization()
 		BeamButton->SetBackgroundColor(Auralization && Auralization->Variant == EAuralizationVariant::Beam ? SelectedButtonColor : ButtonColor);
 		BeamButton->SetIsEnabled(Auralization && Auralization->HasVariantResult(EAuralizationVariant::Beam));
 	}
+	if (HybridButton)
+	{
+		HybridButton->SetBackgroundColor(Auralization && Auralization->Variant == EAuralizationVariant::Hybrid ? SelectedButtonColor : ButtonColor);
+		HybridButton->SetIsEnabled(Auralization && Auralization->HasVariantResult(EAuralizationVariant::Hybrid));
+	}
 }
 
 void USimulationHUDWidget::PinCurrentCurve()
@@ -1192,6 +1212,14 @@ void USimulationHUDWidget::HandleFieldCommitted(FName FieldId, const FText& Text
 	else if (FieldId == FieldBeamOrder)
 	{
 		Settings.MaxBeamOrder = FMath::Clamp(IntValue, 0, 10);
+	}
+	else if (FieldId == FieldHybridK)
+	{
+		Settings.HybridK = FMath::Clamp(IntValue, 0, 10);
+	}
+	else if (FieldId == FieldHybridMix)
+	{
+		Settings.HybridMixingTimeMs = FMath::Clamp(FloatValue, 1.0f, 3000.0f);
 	}
 	LoadFieldsFromManager();
 }
@@ -1295,6 +1323,8 @@ void USimulationHUDWidget::LoadFieldsFromManager()
 	SetField(FieldImageOrder, FString::FromInt(Settings.ImageSourceOrder));
 	SetField(FieldBeamSubdiv, FString::FromInt(Settings.SubdivisionLevel));
 	SetField(FieldBeamOrder, FString::FromInt(Settings.MaxBeamOrder));
+	SetField(FieldHybridK, FString::FromInt(Settings.HybridK));
+	SetField(FieldHybridMix, FString::Printf(TEXT("%.0f"), Settings.HybridMixingTimeMs));
 	if (AirAbsorptionCheck)
 	{
 		AirAbsorptionCheck->SetIsChecked(Settings.bAirAbsorption);
@@ -1475,7 +1505,15 @@ void USimulationHUDWidget::RefreshMetrics()
 	if (TimingText)
 	{
 		FString Text;
-		if (Result->NumBeamNodes > 0)
+		const TSharedPtr<const FHybridResult> Hybrid = Current->GetLastHybridResult();
+		if (Hybrid.IsValid() && Hybrid->Hybrid.Get() == Result && Hybrid->Stats.IsValidIndex(SelectedReceiver))
+		{
+			const FHybridReceiverStats& Stats = Hybrid->Stats[SelectedReceiver];
+			Text = FString::Printf(TEXT("Hybrid K=%d, t_mix %.0f ms: %d early beam reflections at %s (+%d after t_mix left to the rays), last at %.1f ms; rays found %d, missed %d\nbeams: %d root / %d nodes %.3f s; rays: %d, mean order %.1f, %.3f s; total %.3f s"),
+				Hybrid->K, Hybrid->MixingTimeSeconds * 1000.0, Stats.NumBeamEarly, *Receiver.Name, Stats.NumBeamDropped, Stats.LastEarlyArrivalSeconds * 1000.0, Stats.NumFoundByRays, Stats.NumMissedByRays,
+				Result->NumRootBeams, Result->NumBeamNodes, Hybrid->BeamSeconds, Result->NumRays, Result->MeanOrder, Hybrid->RaySeconds, Result->Timing.TotalSeconds);
+		}
+		else if (Result->NumBeamNodes > 0)
 		{
 			Text = FString::Printf(TEXT("%s: %d root beams, %d beam nodes, %d triangles, %d beams contain %s\n%.3f s total (tree %.3f s, receivers %.3f s)"),
 				*Result->SolverName, Result->NumRootBeams, Result->NumBeamNodes, Result->NumTriangles, Receiver.ContainingBeamNodes.Num(), *Receiver.Name,

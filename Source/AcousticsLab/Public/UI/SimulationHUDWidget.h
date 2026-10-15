@@ -84,7 +84,7 @@ public:
 
 	UIRPlotWidget* GetIRPlot() const { return IRPlot; }
 
-	/** Setting fields by id: NumRays, MaxOrder, Seed, ReceiverRadius, BinMs, TMax, AirAbsorption, NumThreads, WallAlpha, DrawOrder, ImageOrder, BeamSubdiv, BeamOrder. */
+	/** Setting fields by id: NumRays, MaxOrder, Seed, ReceiverRadius, BinMs, TMax, AirAbsorption, NumThreads, WallAlpha, DrawOrder, ImageOrder, BeamSubdiv, BeamOrder, HybridK, HybridMixMs. */
 	static TArray<FName> SettingFieldIds();
 
 protected:
@@ -135,7 +135,7 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
 	TObjectPtr<UCheckBox> AirAbsorptionCheck;
 
-	/** Solver selector (M5): Ray tracer / Image sources / Beam tracer. */
+	/** Solver selector (M5): Ray tracer / Image sources / Beam tracer / Hybrid (M8). */
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
 	TObjectPtr<UComboBoxString> SolverCombo;
 
@@ -216,6 +216,10 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
 	TObjectPtr<UButton> BeamButton;
 
+	/** A/B key 4 (M8): the hybrid response. */
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UButton> HybridButton;
+
 private:
 	void BuildDefaultTree();
 	void BuildSettingsRows();
@@ -272,6 +276,9 @@ private:
 
 	UFUNCTION()
 	void HandleBeamClicked();
+
+	UFUNCTION()
+	void HandleHybridClicked();
 
 	UFUNCTION()
 	void HandleSolverChanged(FString SelectedItem, ESelectInfo::Type SelectionType);

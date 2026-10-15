@@ -125,6 +125,36 @@ struct ACOUSTICSCORE_API FImageSourceSample
 	bool bValidForAnyReceiver = false;
 };
 
+/**
+ * Purely specular ray deposits of one reflection sequence at one receiver (M8, hybrid bookkeeping of FRayTracer with
+ * FRayTracerSettings::bRecordSpecularArrivals): every ray that entered the receiver sphere after reflecting specularly
+ * off the same surfaces in the same order. The beams of the hybrid find the same path as one FEarlyReflection.
+ */
+struct ACOUSTICSCORE_API FSpecularRayArrival
+{
+	/** FRayTracer::SurfaceSequenceKey of the reflecting surfaces (coplanar triangle groups) in path order. */
+	uint64 SequenceKey = 0;
+
+	int32 Order = 0;
+
+	/** Image-source delay to the receiver centre d' / c, s (the delay the beams report for the path). */
+	double TimeSeconds = 0.0;
+
+	/**
+	 * Image source of the path (first ray of the group): Origin - Direction * PathLength in the unfolded space. Two
+	 * sequences can share it (reflections off two perpendicular walls commute: A-B and B-A), and a receiver sphere may be
+	 * reached through both while the beams report the one valid at its centre - match beams and rays by image source.
+	 */
+	FVector3d ImageSource = FVector3d::ZeroVector;
+
+	/** Rays of the sequence that entered the sphere and their deposited energy (band 0, relative to the emitted energy). */
+	int32 NumHits = 0;
+	double Energy = 0.0;
+
+	/** The deposits went to ExcludedHistogram (early-specular: order <= ExcludeSpecularMaxOrder and TimeSeconds <= ExcludeSpecularMaxSeconds). */
+	bool bExcluded = false;
+};
+
 /** Histogram, metrics and direct-sound data of one receiver. */
 struct ACOUSTICSCORE_API FReceiverResult
 {
@@ -151,6 +181,16 @@ struct ACOUSTICSCORE_API FReceiverResult
 
 	/** Nodes of FSimulationResult::BeamTree whose beam contains the receiver (order 0 included), for the visualizer. */
 	TArray<int32> ContainingBeamNodes;
+
+	/**
+	 * Ray tracer with FRayTracerSettings::ExcludeSpecularMaxOrder > 0 (M8 hybrid): the early-specular deposits that were
+	 * kept out of Histogram (Histogram + ExcludedHistogram = the plain ray-tracer histogram). Empty otherwise.
+	 */
+	FEnergyHistogram ExcludedHistogram;
+	int64 NumExcludedHits = 0;
+
+	/** Purely specular ray deposits of order 1..ExcludeSpecularMaxOrder grouped by reflection sequence, sorted by time (bRecordSpecularArrivals). */
+	TArray<FSpecularRayArrival> SpecularRayArrivals;
 };
 
 struct ACOUSTICSCORE_API FSimulationTiming

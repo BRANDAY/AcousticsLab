@@ -163,7 +163,7 @@ FString UAuralizationComponent::VariantName(EAuralizationVariant InVariant)
 	case EAuralizationVariant::Dry: return TEXT("Dry");
 	case EAuralizationVariant::Ray: return TEXT("Ray");
 	case EAuralizationVariant::Beam: return TEXT("Beam");
-	case EAuralizationVariant::Hybrid: return TEXT("Hybrid (M8)");
+	case EAuralizationVariant::Hybrid: return TEXT("Hybrid");
 	case EAuralizationVariant::SteamAudio: return TEXT("Steam Audio (M9)");
 	case EAuralizationVariant::AudioTracing: return TEXT("Audio Tracing (M9)");
 	default: return TEXT("none");
@@ -181,7 +181,7 @@ EAuralizationVariant UAuralizationComponent::VariantForSolver(const FString& InS
 	{
 		return EAuralizationVariant::Ray;
 	}
-	if (InSolverName.Equals(TEXT("BeamTracer"), ESearchCase::IgnoreCase))
+	if (InSolverName.StartsWith(TEXT("BeamTracer"), ESearchCase::IgnoreCase)) // BeamTracerK<K>: the beam part of a hybrid run (M8)
 	{
 		return EAuralizationVariant::Beam;
 	}
@@ -326,9 +326,9 @@ void UAuralizationComponent::SetResult(const TSharedPtr<const FSimulationResult>
 		return;
 	}
 	const EAuralizationVariant ResultVariant = VariantForSolver(InSolverName);
-	if (ResultVariant == EAuralizationVariant::None || ResultVariant == EAuralizationVariant::Hybrid)
+	if (ResultVariant == EAuralizationVariant::None)
 	{
-		StatusMessage = FString::Printf(TEXT("%s results have no A/B variant (keys: 2 Ray, 3 Beam)"), *InSolverName);
+		StatusMessage = FString::Printf(TEXT("%s results have no A/B variant (keys: 2 Ray, 3 Beam, 4 Hybrid)"), *InSolverName);
 		UE_LOG(LogAcoustics, Log, TEXT("Auralization: %s; the assigned response (%s) is kept"), *StatusMessage, *VariantName(IRVariant));
 		return;
 	}
@@ -510,12 +510,12 @@ bool UAuralizationComponent::SetVariantByKey(int32 Key)
 		SetVariant(Requested);
 		return true;
 	}
-	if (Requested == EAuralizationVariant::Ray || Requested == EAuralizationVariant::Beam)
+	if (Requested == EAuralizationVariant::Ray || Requested == EAuralizationVariant::Beam || Requested == EAuralizationVariant::Hybrid)
 	{
 		if (!VariantSets.Contains(Requested))
 		{
 			UE_LOG(LogAcoustics, Log, TEXT("Auralization: variant %d (%s) has no result yet; run the %s first (routing stays %s)"), Key, *VariantName(Requested),
-				Requested == EAuralizationVariant::Ray ? TEXT("ray tracer") : TEXT("beam tracer"), *VariantName(Variant));
+				Requested == EAuralizationVariant::Ray ? TEXT("ray tracer") : (Requested == EAuralizationVariant::Beam ? TEXT("beam tracer") : TEXT("hybrid")), *VariantName(Variant));
 			StatusMessage = FString::Printf(TEXT("no %s result yet"), *VariantName(Requested));
 			return false;
 		}
@@ -537,7 +537,7 @@ void UAuralizationComponent::ApplyVariantRouting()
 		return;
 	}
 	// Wet = output of the effect chain (the convolution), dry = the submix input as it came in.
-	const bool bWet = Variant == EAuralizationVariant::Ray || Variant == EAuralizationVariant::Beam;
+	const bool bWet = Variant == EAuralizationVariant::Ray || Variant == EAuralizationVariant::Beam || Variant == EAuralizationVariant::Hybrid;
 	const float WetLevel = bWet ? 1.0f : 0.0f;
 	const float DryLevel = bWet ? 0.0f : 1.0f;
 	Submix->SetSubmixWetLevel(this, WetLevel);

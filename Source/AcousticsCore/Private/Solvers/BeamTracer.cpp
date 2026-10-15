@@ -1294,7 +1294,7 @@ void AcousticsBeamBuild::BuildRootSubtree(const FBeamBuildContext& Context, int3
 				{
 					for (int32 Band = 0; Band < Acoustics::NumBands; ++Band)
 					{
-						ReflectionFactor[Band] = Material.Reflection(Band);
+						ReflectionFactor[Band] = Material.Reflection(Band) * (Settings.bScatteringLoss ? 1.0 - Material.Scattering[Band] : 1.0);
 					}
 				}
 

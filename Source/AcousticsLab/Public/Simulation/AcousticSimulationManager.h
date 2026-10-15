@@ -11,6 +11,7 @@
 
 struct FAcousticScene;
 struct FBeamTracerSettings;
+struct FHybridResult;
 class AAcousticSource;
 class AReceiverGrid;
 class UAuralizationComponent;
@@ -78,7 +79,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Acoustics")
 	FSolverSettings Settings;
 
-	/** Ray tracer, image sources or beam tracer (M5); the hybrid falls back to the ray tracer with a note in StatusMessage until M8. */
+	/** Ray tracer, image sources, beam tracer (M5) or hybrid beam/ray (M8). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Acoustics")
 	EAcousticSolver Solver = EAcousticSolver::RayTracer;
 
@@ -178,6 +179,9 @@ public:
 	const FSimulationResult* GetLastResult() const { return LastResult.Get(); }
 	TSharedPtr<const FSimulationResult> GetLastResultShared() const { return LastResult; }
 
+	/** Pure ray, pure beam (<= K) and hybrid of the last hybrid run (M8, compare panel); null before the first one. */
+	TSharedPtr<const FHybridResult> GetLastHybridResult() const { return LastHybridResult; }
+
 	/** The level's manager, or nullptr. */
 	static AAcousticSimulationManager* Find(UWorld* World);
 
@@ -199,7 +203,7 @@ public:
 	/** Pushes the last result to the path / image-source / beam visualizers and to every receiver grid of the level. */
 	void UpdateVisualizers();
 
-	/** Solver that actually runs for the current Solver choice (the hybrid falls back to the ray tracer until M8). */
+	/** Solver that actually runs for the current Solver choice (every solver has its own path since M8). */
 	EAcousticSolver GetEffectiveSolver() const;
 
 	/** Extracts the acoustic geometry of the world (meters, BVH built) and applies WallAbsorptionOverride. */
@@ -234,6 +238,8 @@ private:
 	TSharedPtr<FAcousticScene> SceneForTask;
 	TSharedPtr<FSolverProgress> ProgressState;
 	TSharedPtr<FSimulationResult> PendingResult;
+	TSharedPtr<FHybridResult> PendingHybrid;
+	TSharedPtr<const FHybridResult> LastHybridResult;
 	UE::Tasks::TTask<void> Task;
 
 	TSharedPtr<const FSimulationResult> LastResult;

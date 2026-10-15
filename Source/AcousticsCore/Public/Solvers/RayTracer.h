@@ -44,6 +44,21 @@ struct ACOUSTICSCORE_API FRayTracerSettings
 	/** Rays per work unit; histograms are reduced in chunk order, so the result is independent of NumThreads. */
 	int32 RaysPerChunk = 1024;
 
+	/**
+	 * Hybrid split (M8, SPEC §2.8, FHybridTracer). With ExcludeSpecularMaxOrder = K > 0 a deposit is early-specular when
+	 * the ray has not been reflected diffusely yet, its order is 1..K and the image-source delay of its path to the
+	 * receiver centre (d' / c, the delay the beams use) is <= ExcludeSpecularMaxSeconds; early-specular deposits go to
+	 * FReceiverResult::ExcludedHistogram instead of Histogram (the beams count them). 0 = off (plain ray tracer).
+	 */
+	int32 ExcludeSpecularMaxOrder = 0;
+	double ExcludeSpecularMaxSeconds = 1.0e30;
+
+	/**
+	 * Groups the purely specular deposits of order 1..ExcludeSpecularMaxOrder by reflection sequence
+	 * (FReceiverResult::SpecularRayArrivals) to compare the reflections the rays find with the beams (SPEC §5 exp. 3).
+	 */
+	bool bRecordSpecularArrivals = false;
+
 	FRayTracerSettings();
 
 	bool Validate(FString& OutError) const;
@@ -90,4 +105,21 @@ public:
 
 	/** Reflected rays start this far from the surface along the facing normal, m. */
 	static constexpr double SurfaceOffset = 1e-7;
+
+	/** Surface (coplanar triangle group of FImageSourceSolver::BuildSurfaces) of every triangle of the scene. */
+	static void BuildTriangleSurfaceMap(const FAcousticScene& Scene, TArray<int32>& OutTriangleSurface);
+
+	/** FNV-1a key of a reflection sequence given as surface indices; SequenceKeyStart is the key of the empty sequence. */
+	static constexpr uint64 SequenceKeyStart = 14695981039346656037ull;
+	static uint64 CombineSequenceKey(uint64 Key, int32 Surface);
+
+	/** Key of a path given as triangles (FEarlyReflection::Triangles) through the surface map of BuildTriangleSurfaceMap. */
+	static uint64 SurfaceSequenceKey(TConstArrayView<int32> Triangles, TConstArrayView<int32> TriangleSurface);
+
+	/**
+	 * Image-source distance of a specular ray to Point: the ray left its image source PathLength meters before Origin and
+	 * travels along the unit Direction; in the unfolded space the image source, Origin and the ray are on one line, so
+	 * d'^2 = (PathLength + a)^2 + p^2 with a the projection of Point - Origin on Direction and p the perpendicular distance.
+	 */
+	static double ImageSourceDistance(const FVector3d& Origin, const FVector3d& Direction, double PathLength, const FVector3d& Point);
 };

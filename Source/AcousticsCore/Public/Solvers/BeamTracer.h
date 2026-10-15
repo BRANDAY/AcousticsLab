@@ -69,6 +69,13 @@ struct ACOUSTICSCORE_API FBeamTracerSettings
 	FVector3d SourceDirection = FVector3d(1.0, 0.0, 0.0);
 	double SourceConeHalfAngleDeg = 180.0;
 
+	/**
+	 * Specular share only (M8 hybrid): a reflection off an ordinary wall multiplies the factor by (1 - alpha)(1 - s), the
+	 * expected specular energy of the stochastic ray tracer (which reflects diffusely with probability s). Off (default,
+	 * M5-M7): (1 - alpha), the image-source energy.
+	 */
+	bool bScatteringLoss = false;
+
 	FBeamTracerSettings();
 
 	bool Validate(FString& OutError) const;

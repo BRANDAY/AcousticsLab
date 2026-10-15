@@ -7,6 +7,7 @@
 #include "HAL/PlatformTime.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Solvers/AcousticRandom.h"
+#include "Solvers/ImageSourceSolver.h"
 
 DECLARE_CYCLE_STAT(TEXT("RayTracer Run"), STAT_AcousticsRayTracerRun, STATGROUP_Acoustics);
 
@@ -45,6 +46,11 @@ bool FRayTracerSettings::Validate(FString& OutError) const
 		OutError = TEXT("RaysPerChunk must be at least 1");
 		return false;
 	}
+	if (ExcludeSpecularMaxOrder < 0 || !(ExcludeSpecularMaxSeconds >= 0.0))
+	{
+		OutError = TEXT("ExcludeSpecularMaxOrder and ExcludeSpecularMaxSeconds must not be negative");
+		return false;
+	}
 	return true;
 }
 
@@ -61,6 +67,11 @@ namespace
 		double E0 = 0.0;
 		double EnergyCutoff = 0.0;
 		double MaxPathLength = 0.0;
+
+		/** Hybrid split (M8): early-specular deposits of order 1..SpecularMaxOrder go to the excluded histograms. */
+		int32 SpecularMaxOrder = 0;
+		double ExcludedMaxTime = 0.0;
+		TArray<int32> TriangleSurface;
 	};
 
 	/** Everything one chunk of rays produced; reduced in chunk order afterwards. */
@@ -69,6 +80,12 @@ namespace
 		TArray<FEnergyHistogram> Histograms;
 		TArray<int64> ReceiverHits;
 		TArray<FPathSample> Paths;
+
+		/** Hybrid split (M8): early-specular deposits (histograms only as long as t_mix needs) and the specular groups. */
+		TArray<FEnergyHistogram> ExcludedHistograms;
+		TArray<int64> ExcludedHits;
+		TArray<TMap<uint64, FSpecularRayArrival>> Arrivals;
+
 		int64 NumSegments = 0;
 		int64 SumOrders = 0;
 		int32 NumRays = 0;
@@ -92,6 +109,11 @@ namespace
 		int32 Order = 0;
 		int32 LastTriangle = INDEX_NONE;
 		bool bReachedReceiver = false;
+
+		// Hybrid split (M8): purely specular so far, and the surfaces reflected from (while the order is <= K).
+		const bool bTrackSpecular = Context.SpecularMaxOrder > 0;
+		bool bDiffuse = false;
+		uint64 SequenceKey = FRayTracer::SequenceKeyStart;
 
 		if (Path)
 		{
@@ -134,9 +156,35 @@ namespace
 					{
 						Deposit[Band] = Settings.bAirAbsorption ? Energy[Band] * FMath::Exp(-Settings.AirAbsorption[Band] * Entry) : Energy[Band];
 					}
-					if (Out.Histograms[ReceiverIndex].AddEnergy(Time, Deposit))
+
+					// Early-specular (SPEC §2.8 as stated in M8.md): no diffuse reflection yet, order 1..K, image-source delay
+					// to the receiver centre <= t_mix. The beams of the hybrid count exactly these paths.
+					const bool bSpecularCandidate = bTrackSpecular && !bDiffuse && Order >= 1 && Order <= Context.SpecularMaxOrder;
+					double SpecularTime = 0.0;
+					bool bEarlySpecular = false;
+					if (bSpecularCandidate)
 					{
-						++Out.ReceiverHits[ReceiverIndex];
+						SpecularTime = FRayTracer::ImageSourceDistance(Origin, Direction, PathLength, Receiver.Position) / Context.SpeedOfSound;
+						bEarlySpecular = SpecularTime <= Settings.ExcludeSpecularMaxSeconds;
+					}
+					FEnergyHistogram& Target = bEarlySpecular ? Out.ExcludedHistograms[ReceiverIndex] : Out.Histograms[ReceiverIndex];
+					if (Target.AddEnergy(Time, Deposit))
+					{
+						++(bEarlySpecular ? Out.ExcludedHits[ReceiverIndex] : Out.ReceiverHits[ReceiverIndex]);
+						if (bSpecularCandidate && Settings.bRecordSpecularArrivals)
+						{
+							FSpecularRayArrival& Arrival = Out.Arrivals[ReceiverIndex].FindOrAdd(SequenceKey);
+							if (Arrival.NumHits == 0)
+							{
+								Arrival.SequenceKey = SequenceKey;
+								Arrival.Order = Order;
+								Arrival.TimeSeconds = SpecularTime;
+								Arrival.ImageSource = Origin - Direction * PathLength;
+								Arrival.bExcluded = bEarlySpecular;
+							}
+							++Arrival.NumHits;
+							Arrival.Energy += Deposit[0];
+						}
 						if (Path)
 						{
 							if (!bReachedReceiver)
@@ -198,9 +246,14 @@ namespace
 
 			// Reflect about the side the ray came from; a hit from behind (open geometry) uses the flipped normal.
 			const FVector3d Facing = Hit.bBackFace ? -Triangle.N : Triangle.N;
+			if (bTrackSpecular && !bDiffuse && Order <= Context.SpecularMaxOrder && Context.TriangleSurface.IsValidIndex(Hit.TriangleIndex))
+			{
+				SequenceKey = FRayTracer::CombineSequenceKey(SequenceKey, Context.TriangleSurface[Hit.TriangleIndex]);
+			}
 			if (Random.NextDouble() < Material.Scattering[0])
 			{
 				Direction = FRayTracer::LambertDirection(Facing, Random.NextDouble(), Random.NextDouble());
+				bDiffuse = true;
 			}
 			else
 			{
@@ -231,6 +284,16 @@ namespace
 			Histogram.Init(Settings.BinSeconds, Settings.MaxTimeSeconds);
 		}
 		Out.ReceiverHits.Init(0, Context.Receivers.Num());
+		if (Context.SpecularMaxOrder > 0)
+		{
+			Out.ExcludedHistograms.SetNum(Context.Receivers.Num());
+			for (FEnergyHistogram& Histogram : Out.ExcludedHistograms)
+			{
+				Histogram.Init(Settings.BinSeconds, Context.ExcludedMaxTime);
+			}
+			Out.ExcludedHits.Init(0, Context.Receivers.Num());
+			Out.Arrivals.SetNum(Context.Receivers.Num());
+		}
 
 		// Path samples: every Stride-th ray (FRayTracer::PathSampleStride), appended in ray order.
 		int32 NumPaths = 0;
@@ -290,6 +353,50 @@ bool FRayTracer::IntersectSegmentSphere(const FVector3d& Origin, const FVector3d
 	const double HalfChord = FMath::Sqrt(FMath::Max(0.0, Radius2 - Perpendicular2));
 	OutEntryDistance = Along - HalfChord;
 	return OutEntryDistance >= 0.0 && OutEntryDistance <= Length;
+}
+
+void FRayTracer::BuildTriangleSurfaceMap(const FAcousticScene& Scene, TArray<int32>& OutTriangleSurface)
+{
+	TArray<FReflectingSurface> Surfaces;
+	FImageSourceSolver::BuildSurfaces(Scene, Surfaces);
+	OutTriangleSurface.Init(INDEX_NONE, Scene.Triangles.Num());
+	for (int32 SurfaceIndex = 0; SurfaceIndex < Surfaces.Num(); ++SurfaceIndex)
+	{
+		for (const int32 TriangleIndex : Surfaces[SurfaceIndex].Triangles)
+		{
+			OutTriangleSurface[TriangleIndex] = SurfaceIndex;
+		}
+	}
+}
+
+uint64 FRayTracer::CombineSequenceKey(uint64 Key, int32 Surface)
+{
+	const uint32 Value = static_cast<uint32>(Surface);
+	for (int32 Byte = 0; Byte < 4; ++Byte)
+	{
+		Key ^= static_cast<uint64>((Value >> (8 * Byte)) & 0xFFu);
+		Key *= 1099511628211ull;
+	}
+	return Key;
+}
+
+uint64 FRayTracer::SurfaceSequenceKey(TConstArrayView<int32> Triangles, TConstArrayView<int32> TriangleSurface)
+{
+	uint64 Key = SequenceKeyStart;
+	for (const int32 Triangle : Triangles)
+	{
+		Key = CombineSequenceKey(Key, TriangleSurface.IsValidIndex(Triangle) ? TriangleSurface[Triangle] : INDEX_NONE);
+	}
+	return Key;
+}
+
+double FRayTracer::ImageSourceDistance(const FVector3d& Origin, const FVector3d& Direction, double PathLength, const FVector3d& Point)
+{
+	const FVector3d ToPoint = Point - Origin;
+	const double Along = FVector3d::DotProduct(ToPoint, Direction);
+	const double Perpendicular2 = FMath::Max(0.0, ToPoint.SizeSquared() - Along * Along);
+	const double Unfolded = PathLength + Along;
+	return FMath::Sqrt(Unfolded * Unfolded + Perpendicular2);
 }
 
 int32 FRayTracer::ResolveNumWorkers(int32 Requested)
@@ -370,6 +477,14 @@ FSimulationResult FRayTracer::Run(const FAcousticScene& Scene, const FVector3d& 
 	Context.E0 = 1.0 / static_cast<double>(Settings.NumRays);
 	Context.EnergyCutoff = Context.E0 * Settings.EnergyThreshold;
 	Context.MaxPathLength = Settings.MaxTimeSeconds * Context.SpeedOfSound;
+	Context.SpecularMaxOrder = Settings.ExcludeSpecularMaxOrder;
+	if (Context.SpecularMaxOrder > 0)
+	{
+		// An early-specular deposit enters the sphere no later than its image-source delay, so the per-chunk excluded
+		// histograms only need to reach t_mix (plus two bins for the rounding).
+		Context.ExcludedMaxTime = FMath::Min(Settings.MaxTimeSeconds, Settings.ExcludeSpecularMaxSeconds + 2.0 * Settings.BinSeconds);
+		BuildTriangleSurfaceMap(Scene, Context.TriangleSurface);
+	}
 
 	const int32 NumChunks = FMath::DivideAndRoundUp(Settings.NumRays, Settings.RaysPerChunk);
 	const int32 NumWorkers = FMath::Min(ResolveNumWorkers(Settings.NumThreads), NumChunks);
@@ -415,7 +530,13 @@ FSimulationResult FRayTracer::Run(const FAcousticScene& Scene, const FVector3d& 
 		Out.Position = Receivers[ReceiverIndex].Position;
 		Out.Radius = Receivers[ReceiverIndex].Radius;
 		Out.Histogram.Init(Settings.BinSeconds, Settings.MaxTimeSeconds);
+		if (Context.SpecularMaxOrder > 0)
+		{
+			Out.ExcludedHistogram.Init(Settings.BinSeconds, Settings.MaxTimeSeconds);
+		}
 	}
+	TArray<TMap<uint64, FSpecularRayArrival>> MergedArrivals;
+	MergedArrivals.SetNum(Context.SpecularMaxOrder > 0 ? Receivers.Num() : 0);
 
 	int64 SumOrders = 0;
 	int32 NumTracedRays = 0;
@@ -429,6 +550,33 @@ FSimulationResult FRayTracer::Run(const FAcousticScene& Scene, const FVector3d& 
 		{
 			Result.Receivers[ReceiverIndex].Histogram.Accumulate(Chunk.Histograms[ReceiverIndex]);
 			Result.Receivers[ReceiverIndex].NumRayHits += Chunk.ReceiverHits[ReceiverIndex];
+			if (Context.SpecularMaxOrder > 0)
+			{
+				FReceiverResult& Out = Result.Receivers[ReceiverIndex];
+				const FEnergyHistogram& Excluded = Chunk.ExcludedHistograms[ReceiverIndex];
+				const int32 NumBins = FMath::Min(Excluded.NumBins, Out.ExcludedHistogram.NumBins);
+				for (int32 Bin = 0; Bin < NumBins; ++Bin)
+				{
+					for (int32 Band = 0; Band < Acoustics::NumBands; ++Band)
+					{
+						Out.ExcludedHistogram.At(Bin, Band) += Excluded.At(Bin, Band);
+					}
+				}
+				Out.NumExcludedHits += Chunk.ExcludedHits[ReceiverIndex];
+				// Groups in chunk order, within a chunk in first-hit order: the sums do not depend on the worker count.
+				for (const TPair<uint64, FSpecularRayArrival>& Pair : Chunk.Arrivals[ReceiverIndex])
+				{
+					if (FSpecularRayArrival* Existing = MergedArrivals[ReceiverIndex].Find(Pair.Key))
+					{
+						Existing->NumHits += Pair.Value.NumHits;
+						Existing->Energy += Pair.Value.Energy;
+					}
+					else
+					{
+						MergedArrivals[ReceiverIndex].Add(Pair.Key, Pair.Value);
+					}
+				}
+			}
 		}
 		Result.Paths.Append(Chunk.Paths);
 		Result.NumSegments += Chunk.NumSegments;
@@ -437,6 +585,15 @@ FSimulationResult FRayTracer::Run(const FAcousticScene& Scene, const FVector3d& 
 		NumTracedRays += Chunk.NumRays;
 	}
 	Result.MeanOrder = NumTracedRays > 0 ? static_cast<double>(SumOrders) / static_cast<double>(NumTracedRays) : 0.0;
+	for (int32 ReceiverIndex = 0; ReceiverIndex < MergedArrivals.Num(); ++ReceiverIndex)
+	{
+		TArray<FSpecularRayArrival>& Arrivals = Result.Receivers[ReceiverIndex].SpecularRayArrivals;
+		MergedArrivals[ReceiverIndex].GenerateValueArray(Arrivals);
+		Arrivals.Sort([](const FSpecularRayArrival& A, const FSpecularRayArrival& B)
+			{
+				return A.TimeSeconds != B.TimeSeconds ? A.TimeSeconds < B.TimeSeconds : A.SequenceKey < B.SequenceKey;
+			});
+	}
 
 	// Direct sound: r^2 / (4 d^2) at d / c when the segment source-receiver is free (SPEC §2.2.7).
 	for (FReceiverResult& Out : Result.Receivers)

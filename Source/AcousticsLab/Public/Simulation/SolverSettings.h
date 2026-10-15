@@ -5,10 +5,11 @@
 #include "SolverSettings.generated.h"
 
 struct FBeamTracerSettings;
+struct FHybridTracerSettings;
 struct FImageSourceSettings;
 struct FRayTracerSettings;
 
-/** Which solver a run uses. Ray tracer (M2), image sources and beam tracer (M5); the hybrid arrives with M8. */
+/** Which solver a run uses. Ray tracer (M2), image sources and beam tracer (M5), hybrid beam/ray (M8). */
 UENUM(BlueprintType)
 enum class EAcousticSolver : uint8
 {
@@ -92,6 +93,10 @@ struct ACOUSTICSLAB_API FSolverSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hybrid", meta = (ClampMin = "0", ClampMax = "10"))
 	int32 HybridK = 2;
 
+	/** Hybrid (M8, SPEC 2.8): beams give the specular paths of order <= HybridK arriving no later than this, ms; rays everything else. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hybrid", meta = (ClampMin = "1.0", ClampMax = "3000.0"))
+	float HybridMixingTimeMs = 80.0f;
+
 	/**
 	 * Beam tracer (M6, SPEC §2.6): beams split at interface triangles into a reflected and a refracted beam. The refracted
 	 * apex is the least-squares intersection of the three refracted guide rays - an approximation (Sikora 2012 §3.1.2).
@@ -102,6 +107,9 @@ struct ACOUSTICSLAB_API FSolverSettings
 	FRayTracerSettings ToRayTracerSettings() const;
 	FImageSourceSettings ToImageSourceSettings() const;
 	FBeamTracerSettings ToBeamTracerSettings() const;
+
+	/** Ray part from ToRayTracerSettings, beam part from ToBeamTracerSettings, K = HybridK, t_mix = HybridMixingTimeMs. */
+	FHybridTracerSettings ToHybridTracerSettings() const;
 
 	/** Summary of the fields the given solver uses. */
 	FString ToString(EAcousticSolver Solver = EAcousticSolver::RayTracer) const;

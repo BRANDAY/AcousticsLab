@@ -1,5 +1,7 @@
 #include "Simulation/AcousticSimulationSubsystem.h"
 
+#include "Solvers/HybridTracer.h"
+
 #include "AcousticsCore.h"
 #include "Engine/GameInstance.h"
 #include "Kismet/GameplayStatics.h"
@@ -31,6 +33,20 @@ void UAcousticSimulationSubsystem::StoreResult(const FString& LevelName, EAcoust
 	const FString Key = MakeResultKey(LevelName, Solver);
 	Results.Add(Key, Result);
 	UE_LOG(LogAcoustics, Log, TEXT("Simulation subsystem: stored result '%s' (%d stored)"), *Key, Results.Num());
+}
+
+void UAcousticSimulationSubsystem::StoreHybridResult(const FString& LevelName, const TSharedPtr<const FHybridResult>& Result)
+{
+	if (Result.IsValid())
+	{
+		HybridResults.Add(LevelName, Result);
+	}
+}
+
+TSharedPtr<const FHybridResult> UAcousticSimulationSubsystem::FindHybridResult(const FString& LevelName) const
+{
+	const TSharedPtr<const FHybridResult>* Found = HybridResults.Find(LevelName);
+	return Found ? *Found : nullptr;
 }
 
 TSharedPtr<const FSimulationResult> UAcousticSimulationSubsystem::FindResult(const FString& LevelName, EAcousticSolver Solver) const

@@ -6,6 +6,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "AcousticSimulationSubsystem.generated.h"
 
+struct FHybridResult;
 struct FSimulationResult;
 
 /** Results per (level, solver) and the last settings used, alive for the whole game instance. */
@@ -23,6 +24,10 @@ public:
 	void StoreResult(const FString& LevelName, EAcousticSolver Solver, const TSharedPtr<const FSimulationResult>& Result);
 	TSharedPtr<const FSimulationResult> FindResult(const FString& LevelName, EAcousticSolver Solver) const;
 	TArray<FString> GetResultKeys() const;
+
+	/** Pure ray / pure beam / hybrid of the last hybrid run per level (M8 compare panel; M9 adds the industry columns). */
+	void StoreHybridResult(const FString& LevelName, const TSharedPtr<const FHybridResult>& Result);
+	TSharedPtr<const FHybridResult> FindHybridResult(const FString& LevelName) const;
 	int32 NumResults() const { return Results.Num(); }
 
 	void RememberSettings(const FSolverSettings& Settings);
@@ -30,6 +35,7 @@ public:
 
 private:
 	TMap<FString, TSharedPtr<const FSimulationResult>> Results;
+	TMap<FString, TSharedPtr<const FHybridResult>> HybridResults;
 
 	UPROPERTY(Transient)
 	FSolverSettings LastSettings;

@@ -1,6 +1,7 @@
 #include "Simulation/SolverSettings.h"
 
 #include "Solvers/BeamTracer.h"
+#include "Solvers/HybridTracer.h"
 #include "Solvers/ImageSourceSolver.h"
 #include "Solvers/RayTracer.h"
 
@@ -61,6 +62,16 @@ FBeamTracerSettings FSolverSettings::ToBeamTracerSettings() const
 	return Result;
 }
 
+FHybridTracerSettings FSolverSettings::ToHybridTracerSettings() const
+{
+	FHybridTracerSettings Result;
+	Result.Ray = ToRayTracerSettings();
+	Result.Beam = ToBeamTracerSettings();
+	Result.K = FMath::Clamp(HybridK, 0, 10);
+	Result.MixingTimeSeconds = FMath::Max(0.001, static_cast<double>(HybridMixingTimeMs) * 0.001);
+	return Result;
+}
+
 FString FSolverSettings::ToString(EAcousticSolver Solver) const
 {
 	const FString Common = FString::Printf(TEXT("r %.2f m, bin %.1f ms, T_max %.1f s, air %s (m %.4f), BVH %s"),
@@ -71,6 +82,9 @@ FString FSolverSettings::ToString(EAcousticSolver Solver) const
 		return FString::Printf(TEXT("image sources up to order %d (budget %d), %s"), ImageSourceOrder, MaxImageSources, *Common);
 	case EAcousticSolver::BeamTracer:
 		return FString::Printf(TEXT("beams: subdivision %d (%d root beams), order <= %d, node budget %d, refraction %s, %s"), SubdivisionLevel, 20 * (1 << (2 * FMath::Max(0, SubdivisionLevel))), MaxBeamOrder, MaxBeamNodes, bRefraction ? TEXT("on") : TEXT("off"), *Common);
+	case EAcousticSolver::Hybrid:
+		return FString::Printf(TEXT("hybrid: beams (subdivision %d) for specular paths of order <= %d by %.0f ms, %d rays (max order %d, seed %d) for the rest, %s, threads %d"),
+			SubdivisionLevel, HybridK, HybridMixingTimeMs, NumRays, MaxOrder, Seed, *Common, NumThreads);
 	default:
 		return FString::Printf(TEXT("%d rays, max order %d, seed %d, %s, threads %d, paths %d"), NumRays, MaxOrder, Seed, *Common, NumThreads, MaxPathsForVisualization);
 	}
