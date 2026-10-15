@@ -107,7 +107,10 @@ bool FBeamNode::ConeContainsPoint(const FVector3d& Point, double Tolerance) cons
 
 bool FBeamNode::ContainsPoint(const FVector3d& Point, double Tolerance) const
 {
-	if (!ConeContainsPoint(Point, Tolerance))
+	// A converging beam occupies the nappe between its start triangle and the focus: the mirror image of that nappe
+	// through the apex is the cone along Directions, so the point is tested mirrored.
+	const FVector3d Tested = bFocusAhead ? Apex * 2.0 - Point : Point;
+	if (!ConeContainsPoint(Tested, Tolerance))
 	{
 		return false;
 	}
@@ -149,37 +152,58 @@ void FBeamTree::Query(const FVector3d& Point, TArray<FBeamContribution>& OutCont
 	}
 }
 
-void FBeamTree::TracePath(int32 NodeIndex, const FVector3d& Point, TArray<FVector3d>& OutPath, TArray<int32>& OutTriangles) const
+void FBeamTree::TracePath(int32 NodeIndex, const FVector3d& Point, TArray<FVector3d>& OutPath, TArray<int32>& OutTriangles, TArray<int32>* OutSegmentMedia) const
 {
 	OutPath.Reset();
 	OutTriangles.Reset();
+	if (OutSegmentMedia)
+	{
+		OutSegmentMedia->Reset();
+	}
 	if (!Nodes.IsValidIndex(NodeIndex))
 	{
 		return;
 	}
-	// Back from the point: the segment to the apex of every node crosses the plane it was reflected from.
+	// Back from the point: the line through the point and the apex of every node crosses the plane the beam entered
+	// through (behind the point for a diverging beam, in front of it towards the focus for a converging one). The
+	// continuation of a converging beam shares its apex with its parent, so the line keeps the previous direction there.
 	TArray<FVector3d, TInlineAllocator<8>> Reverse;
 	TArray<int32, TInlineAllocator<8>> ReverseTriangles;
+	TArray<int32, TInlineAllocator<8>> ReverseMedia;
 	Reverse.Add(Point);
 	FVector3d Current = Point;
+	FVector3d PreviousDirection = FVector3d::ZeroVector;
+	int32 LastMedium = SourceMedium;
 	int32 Index = NodeIndex;
 	while (Index != INDEX_NONE)
 	{
 		const FBeamNode& Node = Nodes[Index];
+		LastMedium = Node.Medium;
 		if (Node.bHasReflectionPlane)
 		{
-			const FVector3d ToApex = Node.Apex - Current;
+			FVector3d LineDirection = Node.Apex - Current;
+			if (LineDirection.SquaredLength() < 1e-24)
+			{
+				LineDirection = PreviousDirection.SquaredLength() > 1e-24 ? PreviousDirection : -Node.Axis();
+			}
+			const double Denominator = FVector3d::DotProduct(LineDirection, Node.ReflectionPlane.Normal);
 			const double DistanceCurrent = Node.ReflectionPlane.SignedDistance(Current);
-			const double DistanceApex = Node.ReflectionPlane.SignedDistance(Node.Apex);
-			const double Denominator = DistanceCurrent - DistanceApex;
-			const double T = FMath::Abs(Denominator) > 1e-300 ? FMath::Clamp(DistanceCurrent / Denominator, 0.0, 1.0) : 0.0;
-			Current = Current + ToApex * T;
-			Reverse.Add(Current);
-			ReverseTriangles.Add(Node.ReflectionTriangle);
+			double S = FMath::Abs(Denominator) > 1e-300 ? -DistanceCurrent / Denominator : 0.0;
+			const double MaxStep = 4.0 * EscapeLength / FMath::Max(LineDirection.Length(), 1e-300);
+			S = FMath::Clamp(S, -MaxStep, MaxStep);
+			Current = Current + LineDirection * S;
+			PreviousDirection = LineDirection;
+			if (!Node.bContinuation)
+			{
+				Reverse.Add(Current);
+				ReverseTriangles.Add(Node.ReflectionTriangle);
+				ReverseMedia.Add(Node.Medium);
+			}
 		}
 		Index = Node.Parent;
 	}
 	Reverse.Add(Source);
+	ReverseMedia.Add(LastMedium);
 	OutPath.Reserve(Reverse.Num());
 	for (int32 I = Reverse.Num() - 1; I >= 0; --I)
 	{
@@ -190,6 +214,26 @@ void FBeamTree::TracePath(int32 NodeIndex, const FVector3d& Point, TArray<FVecto
 	{
 		OutTriangles.Add(ReverseTriangles[I]);
 	}
+	if (OutSegmentMedia)
+	{
+		OutSegmentMedia->Reserve(ReverseMedia.Num());
+		for (int32 I = ReverseMedia.Num() - 1; I >= 0; --I)
+		{
+			OutSegmentMedia->Add(ReverseMedia[I]);
+		}
+		check(OutSegmentMedia->Num() == OutPath.Num() - 1);
+	}
+}
+
+double FBeamTree::PathDelaySeconds(const FAcousticScene& Scene, TConstArrayView<FVector3d> Path, TConstArrayView<int32> SegmentMedia)
+{
+	double Delay = 0.0;
+	for (int32 Segment = 0; Segment + 1 < Path.Num(); ++Segment)
+	{
+		const int32 Medium = SegmentMedia.IsValidIndex(Segment) ? SegmentMedia[Segment] : 0;
+		Delay += (Path[Segment + 1] - Path[Segment]).Length() / Scene.GetMedium(Medium).SpeedOfSound;
+	}
+	return Delay;
 }
 
 bool FBeamTree::IsIdentical(const FBeamTree& Other, double Tolerance) const
@@ -203,6 +247,10 @@ bool FBeamTree::IsIdentical(const FBeamTree& Other, double Tolerance) const
 		const FBeamNode& A = Nodes[Index];
 		const FBeamNode& B = Other.Nodes[Index];
 		if (A.Order != B.Order || A.Parent != B.Parent || A.HitTriangle != B.HitTriangle || A.ReflectionTriangle != B.ReflectionTriangle || A.RootBeam != B.RootBeam || A.SequenceHash != B.SequenceHash)
+		{
+			return false;
+		}
+		if (A.Medium != B.Medium || A.NumRefractions != B.NumRefractions || A.bRefracted != B.bRefracted || A.bFocusAhead != B.bFocusAhead || A.bContinuation != B.bContinuation || A.bTotalInternalReflection != B.bTotalInternalReflection)
 		{
 			return false;
 		}
@@ -235,8 +283,14 @@ FString FBeamTree::DescribeStats() const
 	{
 		PerOrder += FString::Printf(TEXT("%s%d"), Order > 0 ? TEXT("/") : TEXT(""), NumNodesPerOrder[Order]);
 	}
-	return FString::Printf(TEXT("%d root beams (level %d), %d nodes by order %s, %d escaped, %d unresolved, %d slivers dropped%s"),
-		NumRootBeams, SubdivisionLevel, Nodes.Num(), *PerOrder, NumEscaped, NumUnresolved, NumSlivers, bTruncated ? TEXT(", TRUNCATED by the node budget") : TEXT(""));
+	FString Refraction;
+	if (NumRefracted > 0 || NumTotalInternalReflections > 0)
+	{
+		Refraction = FString::Printf(TEXT(", %d refracted, %d total internal reflections, %d continued beyond the focus, %d parallel apexes"), NumRefracted, NumTotalInternalReflections, NumContinuations, NumParallelApexes);
+	}
+	const FString Emitted = NumRootBeamsEmitted != NumRootBeams ? FString::Printf(TEXT(" (%d emitted in the cone)"), NumRootBeamsEmitted) : FString();
+	return FString::Printf(TEXT("%d root beams (level %d)%s, %d nodes by order %s, %d escaped, %d unresolved, %d slivers dropped%s%s"),
+		NumRootBeams, SubdivisionLevel, *Emitted, Nodes.Num(), *PerOrder, NumEscaped, NumUnresolved, NumSlivers, *Refraction, bTruncated ? TEXT(", TRUNCATED by the node budget") : TEXT(""));
 }
 
 FQuat4d FBeamTracer::EmissionRotation()
@@ -300,6 +354,96 @@ FVector3d FBeamTracer::MirrorPoint(const FVector3d& Point, const FAcousticPlane&
 FVector3d FBeamTracer::ReflectDirection(const FVector3d& Direction, const FVector3d& Normal)
 {
 	return (Direction - Normal * (2.0 * FVector3d::DotProduct(Direction, Normal))).GetSafeNormal();
+}
+
+bool FBeamTracer::RefractDirection(const FVector3d& Direction, const FVector3d& Normal, double C1, double C2, FVector3d& OutDirection, double MaxSinRefracted)
+{
+	// Snell with the normal pointing into the incident medium: cos(theta1) = -D . N.
+	FVector3d N = Normal;
+	double CosIn = -FVector3d::DotProduct(Direction, N);
+	if (CosIn < 0.0)
+	{
+		N = -N;
+		CosIn = -CosIn;
+	}
+	CosIn = FMath::Min(CosIn, 1.0);
+	const double Eta = C1 > 0.0 ? C2 / C1 : 1.0;
+	const double SinIn2 = FMath::Max(0.0, 1.0 - CosIn * CosIn);
+	const double SinOut2 = Eta * Eta * SinIn2;
+	if (MaxSinRefracted < 1.0 && SinOut2 > MaxSinRefracted * MaxSinRefracted)
+	{
+		// Beyond the clamp: the largest allowed refraction angle in the plane of incidence.
+		const FVector3d Tangent = (Direction + N * CosIn).GetSafeNormal();
+		const double CosOut = FMath::Sqrt(1.0 - MaxSinRefracted * MaxSinRefracted);
+		OutDirection = (Tangent * MaxSinRefracted - N * CosOut).GetSafeNormal();
+		return true;
+	}
+	if (SinOut2 > 1.0)
+	{
+		return false; // total internal reflection
+	}
+	const double CosOut = FMath::Sqrt(1.0 - SinOut2);
+	// Tangential component scaled by eta, normal component rebuilt from cos(theta2), pointing away from the incident side.
+	OutDirection = (Direction * Eta + N * (Eta * CosIn - CosOut)).GetSafeNormal();
+	return true;
+}
+
+bool FBeamTracer::LeastSquaresApex(TConstArrayView<FVector3d> Origins, TConstArrayView<FVector3d> Directions, FVector3d& OutPoint, double FallbackDistance)
+{
+	// Minimize sum_i |(X - O_i) - ((X - O_i) . D_i) D_i|^2: A X = B with A = sum (I - D D^T), B = sum (I - D D^T) O.
+	const int32 Num = FMath::Min(Origins.Num(), Directions.Num());
+	double A[3][3] = { { 0.0, 0.0, 0.0 }, { 0.0, 0.0, 0.0 }, { 0.0, 0.0, 0.0 } };
+	FVector3d B = FVector3d::ZeroVector;
+	FVector3d MeanOrigin = FVector3d::ZeroVector;
+	FVector3d MeanDirection = FVector3d::ZeroVector;
+	for (int32 Index = 0; Index < Num; ++Index)
+	{
+		const FVector3d D = Directions[Index].GetSafeNormal();
+		const FVector3d& O = Origins[Index];
+		const double Dc[3] = { D.X, D.Y, D.Z };
+		const double Oc[3] = { O.X, O.Y, O.Z };
+		const double OdotD = FVector3d::DotProduct(O, D);
+		for (int32 Row = 0; Row < 3; ++Row)
+		{
+			for (int32 Col = 0; Col < 3; ++Col)
+			{
+				A[Row][Col] += (Row == Col ? 1.0 : 0.0) - Dc[Row] * Dc[Col];
+			}
+		}
+		B += O - D * OdotD;
+		MeanOrigin += O;
+		MeanDirection += D;
+	}
+	if (Num > 0)
+	{
+		MeanOrigin /= Num;
+	}
+	MeanDirection = MeanDirection.GetSafeNormal();
+
+	const double Det =
+		A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1]) -
+		A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0]) +
+		A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]);
+	// A is singular exactly when every line is parallel; the eigenvalue along a nearly common direction is
+	// 1 - cos^2 of the spread, so a determinant below this means directions within about 1e-6 rad of each other.
+	if (Num < 2 || !(FMath::Abs(Det) > 1e-12))
+	{
+		OutPoint = MeanOrigin - MeanDirection * FallbackDistance;
+		return false;
+	}
+	const double Inv[3][3] = {
+		{ (A[1][1] * A[2][2] - A[1][2] * A[2][1]) / Det, (A[0][2] * A[2][1] - A[0][1] * A[2][2]) / Det, (A[0][1] * A[1][2] - A[0][2] * A[1][1]) / Det },
+		{ (A[1][2] * A[2][0] - A[1][0] * A[2][2]) / Det, (A[0][0] * A[2][2] - A[0][2] * A[2][0]) / Det, (A[0][2] * A[1][0] - A[0][0] * A[1][2]) / Det },
+		{ (A[1][0] * A[2][1] - A[1][1] * A[2][0]) / Det, (A[0][1] * A[2][0] - A[0][0] * A[2][1]) / Det, (A[0][0] * A[1][1] - A[0][1] * A[1][0]) / Det }
+	};
+	const double Bc[3] = { B.X, B.Y, B.Z };
+	double X[3];
+	for (int32 Row = 0; Row < 3; ++Row)
+	{
+		X[Row] = Inv[Row][0] * Bc[0] + Inv[Row][1] * Bc[1] + Inv[Row][2] * Bc[2];
+	}
+	OutPoint = FVector3d(X[0], X[1], X[2]);
+	return true;
 }
 
 bool FBeamTracer::RayPlaneHit(const FVector3d& Apex, const FVector3d& Direction, const FAcousticPlane& Plane, FVector3d& OutPoint, double& OutDistance)
@@ -406,7 +550,7 @@ namespace
 		}
 	};
 
-	/** A beam waiting to be divided. */
+	/** A beam waiting to be divided. Directions are propagation directions; for a converging beam (bFocusAhead) they point away from the entry triangle towards the focus and beyond. */
 	struct FPendingBeam
 	{
 		FVector3d Apex = FVector3d::ZeroVector;
@@ -419,6 +563,14 @@ namespace
 		int32 Parent = INDEX_NONE;
 		int32 RootBeam = INDEX_NONE;
 		uint64 SequenceHash = 0;
+		int32 Medium = 0;
+		int32 NumRefractions = 0;
+		bool bRefracted = false;
+		bool bFocusAhead = false;
+		bool bContinuation = false;
+
+		/** +1 for a diverging beam, -1 for a converging one: the geometry (cone, projection) uses Sign * Directions. */
+		double Sign() const { return bFocusAhead ? -1.0 : 1.0; }
 	};
 
 	struct FCandidate
@@ -429,9 +581,11 @@ namespace
 		FAcousticPlane HitPlane;
 	};
 
-	uint64 CombineSequence(uint64 ParentHash, int32 Triangle)
+	uint64 CombineSequence(uint64 ParentHash, int32 Triangle, bool bRefraction = false)
 	{
-		uint64 Hash = ParentHash ^ (static_cast<uint64>(Triangle + 1) * 0x9E3779B97F4A7C15ull);
+		// Reflection at a surface and refraction through it are different events of the same surface.
+		const int64 Event = bRefraction ? -static_cast<int64>(Triangle) - 2 : static_cast<int64>(Triangle) + 1;
+		uint64 Hash = ParentHash ^ (static_cast<uint64>(Event) * 0x9E3779B97F4A7C15ull);
 		Hash ^= Hash >> 29;
 		Hash *= 0xBF58476D1CE4E5B9ull;
 		Hash ^= Hash >> 32;
@@ -484,6 +638,10 @@ namespace
 		TArray<FPolygon2d> NextPieces;
 		TArray<FPolygon2d> Outside;
 		FPolygon2d Inside;
+		TArray<FPolygon2d> Claimed;
+		TArray<FPolygon2d> NextClaimed;
+		TArray<FPolygon2d> OutsideOther;
+		FPolygon2d InsideOther;
 		TArray<FIntVector> Fan;
 
 		FBeamBuilder(const FAcousticScene& InScene, const FBeamTracerSettings& InSettings, FBeamTree& InTree)
@@ -493,23 +651,25 @@ namespace
 		{
 		}
 
-		bool NearestHitIsPlane(const FPendingBeam& Beam, const FVector3d& Direction, const FAcousticPlane& HitPlane) const
+		/** Continuations of converging beams beyond their focus, divided right after the beam that produced them. */
+		TArray<FPendingBeam> Continuations;
+
+		/**
+		 * A ray through the centre of the piece: it must reach the candidate plane before any other triangle. GeometryDirection
+		 * is the direction from the apex (towards the entry plane for a converging beam); the ray itself travels along the
+		 * propagation direction from the point where the beam entered.
+		 */
+		bool NearestHitIsPlane(const FPendingBeam& Beam, const FVector3d& GeometryDirection, const FAcousticPlane& HitPlane) const
 		{
-			// A ray through the centre of the piece: it must reach the candidate plane before any other triangle.
-			FVector3d Origin = Beam.Apex;
-			if (Beam.bHasReflectionPlane)
+			FVector3d Origin;
+			FVector3d Propagation;
+			if (!PropagationRay(Beam, GeometryDirection, Origin, Propagation))
 			{
-				FVector3d Crossing;
-				double Distance = 0.0;
-				if (!FBeamTracer::RayPlaneHit(Beam.Apex, Direction, Beam.ReflectionPlane, Crossing, Distance))
-				{
-					return true;
-				}
-				Origin = Crossing;
+				return true;
 			}
 			FVector3d PlanePoint;
 			double PlaneDistance = 0.0;
-			if (!FBeamTracer::RayPlaneHit(Origin, Direction, HitPlane, PlanePoint, PlaneDistance))
+			if (!FBeamTracer::RayPlaneHit(Origin, Propagation, HitPlane, PlanePoint, PlaneDistance))
 			{
 				return true;
 			}
@@ -518,9 +678,52 @@ namespace
 			Options.TMin = 1e-9;
 			Options.TMax = PlaneDistance * (1.0 - 1e-6);
 			FRayHit Hit;
-			const FAcousticRay Ray(Origin, Direction);
+			const FAcousticRay Ray(Origin, Propagation);
 			const bool bHit = Settings.bUseBVH ? Scene.IntersectRay(Ray, Hit, Options) : Scene.IntersectRayBruteForce(Ray, Hit, Options);
 			return !bHit;
+		}
+
+		/**
+		 * The ray the beam travels along in a geometry direction: from the apex for a root beam, from the crossing of the
+		 * entry plane otherwise, along the propagation direction. False when the direction misses the entry plane.
+		 */
+		bool PropagationRay(const FPendingBeam& Beam, const FVector3d& GeometryDirection, FVector3d& OutOrigin, FVector3d& OutDirection) const
+		{
+			OutDirection = GeometryDirection * Beam.Sign();
+			OutOrigin = Beam.Apex;
+			if (Beam.bHasReflectionPlane)
+			{
+				FVector3d Crossing;
+				double Distance = 0.0;
+				if (FBeamTracer::RayPlaneHit(Beam.Apex, GeometryDirection, Beam.ReflectionPlane, Crossing, Distance))
+				{
+					OutOrigin = Crossing;
+				}
+				else if (!Beam.bContinuation)
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
+		/** Along the beam ray in a direction where both candidates overlap: true when Other is hit before Candidate. */
+		bool OtherIsNearer(const FPendingBeam& Beam, const FVector3d& GeometryDirection, const FAcousticPlane& CandidatePlane, const FAcousticPlane& OtherPlane) const
+		{
+			FVector3d Origin;
+			FVector3d Propagation;
+			if (!PropagationRay(Beam, GeometryDirection, Origin, Propagation))
+			{
+				return false;
+			}
+			FVector3d Point;
+			double CandidateDistance = 0.0;
+			double OtherDistance = 0.0;
+			if (!FBeamTracer::RayPlaneHit(Origin, Propagation, CandidatePlane, Point, CandidateDistance) || !FBeamTracer::RayPlaneHit(Origin, Propagation, OtherPlane, Point, OtherDistance))
+			{
+				return false;
+			}
+			return OtherDistance < CandidateDistance * (1.0 - 1e-9);
 		}
 
 		void AddNode(const FPendingBeam& Beam, const FBeamFrame& Frame, const FVector2d& P0, const FVector2d& P1, const FVector2d& P2, const FCandidate* Candidate)
@@ -535,11 +738,14 @@ namespace
 				Tree.bTruncated = true;
 				return;
 			}
+			const double Sign = Beam.Sign();
+			const FVector3d Geometry[3] = { Frame.Unproject(P0), Frame.Unproject(P1), Frame.Unproject(P2) };
 			FBeamNode Node;
 			Node.Apex = Beam.Apex;
-			Node.Directions[0] = Frame.Unproject(P0);
-			Node.Directions[1] = Frame.Unproject(P1);
-			Node.Directions[2] = Frame.Unproject(P2);
+			for (int32 Index = 0; Index < 3; ++Index)
+			{
+				Node.Directions[Index] = Geometry[Index] * Sign;
+			}
 			Node.ComputeSidePlanes();
 			Node.ReflectionPlane = Beam.ReflectionPlane;
 			Node.bHasReflectionPlane = Beam.bHasReflectionPlane;
@@ -548,6 +754,11 @@ namespace
 			Node.RootBeam = Beam.RootBeam;
 			Node.Order = Beam.Order;
 			Node.SequenceHash = Beam.SequenceHash;
+			Node.Medium = Beam.Medium;
+			Node.NumRefractions = Beam.NumRefractions;
+			Node.bRefracted = Beam.bRefracted;
+			Node.bFocusAhead = Beam.bFocusAhead;
+			Node.bContinuation = Beam.bContinuation;
 			for (int32 Band = 0; Band < Acoustics::NumBands; ++Band)
 			{
 				Node.Factor[Band] = Beam.Factor[Band];
@@ -556,7 +767,7 @@ namespace
 			{
 				FVector3d Point;
 				double Distance = 0.0;
-				if (Beam.bHasReflectionPlane && FBeamTracer::RayPlaneHit(Beam.Apex, Node.Directions[Index], Beam.ReflectionPlane, Point, Distance))
+				if (Beam.bHasReflectionPlane && FBeamTracer::RayPlaneHit(Beam.Apex, Geometry[Index], Beam.ReflectionPlane, Point, Distance))
 				{
 					Node.StartPoints[Index] = Point;
 				}
@@ -564,13 +775,17 @@ namespace
 				{
 					Node.StartPoints[Index] = Beam.Apex;
 				}
-				if (Candidate && FBeamTracer::RayPlaneHit(Beam.Apex, Node.Directions[Index], Candidate->HitPlane, Point, Distance))
+				if (Candidate && FBeamTracer::RayPlaneHit(Beam.Apex, Geometry[Index], Candidate->HitPlane, Point, Distance))
 				{
 					Node.EndPoints[Index] = Point;
 				}
+				else if (Beam.bFocusAhead)
+				{
+					Node.EndPoints[Index] = Beam.Apex; // a converging beam that hits nothing narrows down to its focus
+				}
 				else
 				{
-					Node.EndPoints[Index] = Beam.Apex + Node.Directions[Index] * Tree.EscapeLength;
+					Node.EndPoints[Index] = Beam.Apex + Geometry[Index] * Tree.EscapeLength;
 				}
 			}
 			if (Candidate)
@@ -578,15 +793,64 @@ namespace
 				Node.HitTriangle = Candidate->Triangle;
 				Node.HitPlane = Candidate->HitPlane;
 			}
+			else if (Beam.bFocusAhead)
+			{
+				// Beyond the focus the beam diverges again: a continuation node of the same order, entered through the focal plane.
+				FPendingBeam Continuation;
+				Continuation.Apex = Beam.Apex;
+				for (int32 Index = 0; Index < 3; ++Index)
+				{
+					Continuation.Directions[Index] = Node.Directions[Index];
+				}
+				Continuation.Order = Beam.Order;
+				for (int32 Band = 0; Band < Acoustics::NumBands; ++Band)
+				{
+					Continuation.Factor[Band] = Beam.Factor[Band];
+				}
+				Continuation.ReflectionPlane = FAcousticPlane(Node.Axis(), Beam.Apex);
+				Continuation.bHasReflectionPlane = true;
+				Continuation.ReflectionTriangle = INDEX_NONE;
+				Continuation.Parent = Tree.Nodes.Num();
+				Continuation.RootBeam = Beam.RootBeam;
+				Continuation.SequenceHash = CombineSequence(Beam.SequenceHash, INDEX_NONE, true);
+				Continuation.Medium = Beam.Medium;
+				Continuation.NumRefractions = Beam.NumRefractions;
+				Continuation.bContinuation = true;
+				Continuations.Add(MoveTemp(Continuation));
+				++Tree.NumContinuations;
+			}
 			Tree.Nodes.Add(MoveTemp(Node));
 		}
 
-		/** Divides one beam into nodes (SPEC §2.5.3). Returns false when the tree is truncated. */
+		/** Divides one beam and the continuations it spawns (SPEC §2.5.3). Returns false when the tree is truncated. */
 		bool Divide(const FPendingBeam& Beam)
 		{
-			const FBeamFrame Frame(Beam.Apex, Beam.Directions[0], Beam.Directions[1], Beam.Directions[2]);
+			Continuations.Reset();
+			if (!DivideOne(Beam))
+			{
+				return false;
+			}
+			// A continuation is diverging and never spawns another one; the array is consumed in order.
+			for (int32 Index = 0; Index < Continuations.Num(); ++Index)
+			{
+				const FPendingBeam Continuation = Continuations[Index];
+				if (!DivideOne(Continuation))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
+		bool DivideOne(const FPendingBeam& Beam)
+		{
+			// Geometry directions: from the apex towards the entry triangle; for a diverging beam these are the propagation
+			// directions, for a converging one (focus ahead) their opposites.
+			const double Sign = Beam.Sign();
+			const FVector3d Geometry[3] = { Beam.Directions[0] * Sign, Beam.Directions[1] * Sign, Beam.Directions[2] * Sign };
+			const FBeamFrame Frame(Beam.Apex, Geometry[0], Geometry[1], Geometry[2]);
 			FPolygon2d BeamPolygon;
-			for (const FVector3d& Direction : Beam.Directions)
+			for (const FVector3d& Direction : Geometry)
 			{
 				FVector2d P;
 				if (!Frame.ProjectDirection(Direction, P))
@@ -603,8 +867,29 @@ namespace
 			}
 
 			// Candidate triangles: those inside the frustum, cut to the apex half-space and (for reflected beams) to the
-			// room side of the reflecting plane, projected on the reference plane, nearest first.
-			const FAcousticFrustum Frustum = FAcousticFrustum::FromTriangularBeam(Beam.Apex, Beam.Directions[0], Beam.Directions[1], Beam.Directions[2]);
+			// room side of the reflecting plane, projected on the reference plane, nearest first along the propagation
+			// (nearest to the apex for a diverging beam, farthest from it for a converging one).
+			FVector3d EntryCentroid = Beam.Apex;
+			if (Beam.bHasReflectionPlane)
+			{
+				FVector3d Sum = FVector3d::ZeroVector;
+				int32 Count = 0;
+				for (const FVector3d& Direction : Geometry)
+				{
+					FVector3d Point;
+					double Distance = 0.0;
+					if (FBeamTracer::RayPlaneHit(Beam.Apex, Direction, Beam.ReflectionPlane, Point, Distance))
+					{
+						Sum += Point;
+						++Count;
+					}
+				}
+				if (Count > 0)
+				{
+					EntryCentroid = Sum / Count;
+				}
+			}
+			const FAcousticFrustum Frustum = FAcousticFrustum::FromTriangularBeam(Beam.Apex, Geometry[0], Geometry[1], Geometry[2]);
 			if (Settings.bUseBVH)
 			{
 				Scene.Bvh.QueryFrustum(Scene.Triangles, Frustum, Candidates);
@@ -669,14 +954,15 @@ namespace
 				{
 					continue;
 				}
-				// Hit plane oriented towards the apex (the side the beam comes from).
+				// Hit plane oriented towards the side the beam comes from: the apex for a diverging beam, the entry
+				// triangle for a converging one (whose apex lies beyond the triangles it hits).
 				FVector3d Normal = Triangle.N;
-				if (Triangle.SignedDistance(Beam.Apex) < 0.0)
+				if (Triangle.SignedDistance(Beam.bFocusAhead ? EntryCentroid : Beam.Apex) < 0.0)
 				{
 					Normal = -Normal;
 				}
 				Candidate.HitPlane = FAcousticPlane(Normal, Triangle.V0);
-				Candidate.Distance = (Triangle.Centroid() - Beam.Apex).Length();
+				Candidate.Distance = (Triangle.Centroid() - Beam.Apex).Length() * Sign;
 				Prepared.Add(MoveTemp(Candidate));
 			}
 			Algo::Sort(Prepared, [](const FCandidate& A, const FCandidate& B) { return A.Distance < B.Distance || (A.Distance == B.Distance && A.Triangle < B.Triangle); });
@@ -697,19 +983,60 @@ namespace
 							NextPieces.Add(Piece);
 							continue;
 						}
-						if (!NearestHitIsPlane(Beam, Frame.Unproject(Centroid(Inside)), Candidate.HitPlane))
+						// Hidden surfaces: the sort by centroid distance is only a heuristic (a large triangle sorted later may
+						// still lie nearer over part of this overlap), so every other candidate that overlaps the piece and is
+						// nearer there (non-intersecting triangles keep one depth order over their whole overlap) cuts its
+						// part out; those parts return to the remainder and are claimed when that candidate's turn comes.
+						Claimed.Reset();
+						Claimed.Add(Inside);
+						for (const FCandidate& Other : Prepared)
 						{
-							NextPieces.Add(Piece); // another triangle is nearer in this direction: wait for its turn
-							continue;
-						}
-						bClaimed = true;
-						FanTriangulate(Inside.Num(), Fan);
-						for (const FIntVector& Triangle : Fan)
-						{
-							AddNode(Beam, Frame, Inside[Triangle.X], Inside[Triangle.Y], Inside[Triangle.Z], &Candidate);
-							if (Tree.bTruncated)
+							if (&Other == &Candidate)
 							{
-								return false;
+								continue;
+							}
+							NextClaimed.Reset();
+							for (const FPolygon2d& Poly : Claimed)
+							{
+								SplitPolygon(Poly, Other.Projected, InsideOther, OutsideOther);
+								if (InsideOther.Num() >= 3 && !IsSliver(InsideOther) && OtherIsNearer(Beam, Frame.Unproject(Centroid(InsideOther)), Candidate.HitPlane, Other.HitPlane))
+								{
+									NextPieces.Add(InsideOther);
+									for (FPolygon2d& Rest : OutsideOther)
+									{
+										if (!IsSliver(Rest))
+										{
+											NextClaimed.Add(MoveTemp(Rest));
+										}
+										else
+										{
+											++Tree.NumSlivers;
+										}
+									}
+								}
+								else
+								{
+									NextClaimed.Add(Poly);
+								}
+							}
+							Swap(Claimed, NextClaimed);
+						}
+						for (const FPolygon2d& Poly : Claimed)
+						{
+							if (!NearestHitIsPlane(Beam, Frame.Unproject(Centroid(Poly)), Candidate.HitPlane))
+							{
+								NextPieces.Add(Poly); // a triangle outside the candidates (or dropped as a sliver) is nearer: wait
+								continue;
+							}
+							bClaimed = true;
+							FanTriangulate(Poly.Num(), Fan);
+							for (const FIntVector& Triangle : Fan)
+							{
+								AddNode(Beam, Frame, Poly[Triangle.X], Poly[Triangle.Y], Poly[Triangle.Z], &Candidate);
+								if (Tree.bTruncated)
+								{
+									return false;
+								}
 							}
 						}
 						for (FPolygon2d& Rest : Outside)
@@ -803,6 +1130,7 @@ TSharedPtr<FBeamTree> FBeamTracer::BuildTree(const FAcousticScene& Scene, const 
 
 	TSharedPtr<FBeamTree> Tree = MakeShared<FBeamTree>();
 	Tree->Source = Source;
+	Tree->SourceMedium = Scene.Media.IsValidIndex(Settings.SourceMedium) ? Settings.SourceMedium : 0;
 	Tree->SubdivisionLevel = Settings.SubdivisionLevel;
 	Tree->MaxOrder = Settings.MaxBeamOrder;
 	Tree->NumRootBeams = FBeamTracerSettings::NumRootBeams(Settings.SubdivisionLevel);
@@ -830,7 +1158,10 @@ TSharedPtr<FBeamTree> FBeamTracer::BuildTree(const FAcousticScene& Scene, const 
 	FBeamBuilder Builder(Scene, Settings, *Tree);
 	Tree->Nodes.Reserve(FMath::Min(Settings.MaxBeamNodes, Tree->NumRootBeams * 8));
 
-	// Order 0: the emission beams.
+	// Order 0: the emission beams (only those inside the cone of a directional source).
+	const FVector3d ConeAxis = Settings.SourceDirection.GetSafeNormal();
+	const double ConeCos = FMath::Cos(FMath::DegreesToRadians(FMath::Clamp(Settings.SourceConeHalfAngleDeg, 0.0, 180.0)));
+	const bool bRefraction = Settings.bRefraction && Scene.HasInterfaces();
 	for (int32 Beam = 0; Beam < Tree->NumRootBeams; ++Beam)
 	{
 		if (Progress && Progress->IsCancelRequested())
@@ -843,11 +1174,21 @@ TSharedPtr<FBeamTree> FBeamTracer::BuildTree(const FAcousticScene& Scene, const 
 		{
 			Pending.Directions[Index] = Directions[Beam * 3 + Index];
 		}
+		if (Settings.bDirectionalSource && !ConeAxis.IsNearlyZero())
+		{
+			const FVector3d Centre = (Pending.Directions[0] + Pending.Directions[1] + Pending.Directions[2]).GetSafeNormal();
+			if (FVector3d::DotProduct(Centre, ConeAxis) < ConeCos)
+			{
+				continue;
+			}
+		}
 		for (double& Value : Pending.Factor)
 		{
 			Value = 1.0;
 		}
 		Pending.RootBeam = Beam;
+		Pending.Medium = Tree->SourceMedium;
+		++Tree->NumRootBeamsEmitted;
 		if (!Builder.Divide(Pending))
 		{
 			break;
@@ -870,7 +1211,10 @@ TSharedPtr<FBeamTree> FBeamTracer::BuildTree(const FAcousticScene& Scene, const 
 			{
 				return Tree;
 			}
-			FPendingBeam Pending;
+			FPendingBeam Reflected;
+			FPendingBeam Refracted;
+			bool bHasReflected = false;
+			bool bHasRefracted = false;
 			{
 				const FBeamNode& Node = Tree->Nodes[Index];
 				if (Node.HitTriangle == INDEX_NONE)
@@ -879,31 +1223,144 @@ TSharedPtr<FBeamTree> FBeamTracer::BuildTree(const FAcousticScene& Scene, const 
 				}
 				const FAcousticTriangle& Triangle = Scene.Triangles[Node.HitTriangle];
 				const FAcousticMaterialProps& Material = Scene.GetMaterialOf(Triangle);
+				const bool bInterface = bRefraction && Triangle.bInterface && Triangle.MediumFront != Triangle.MediumBack;
+
+				// Energy split at the surface: by the material (1 - alpha) for a wall, by the impedances for an interface
+				// (SPEC §2.6: R for the reflected beam, T = 1 - R for the refracted one; everything for the reflected beam
+				// beyond the critical angle).
+				double ReflectionFactor[Acoustics::NumBands];
+				double TransmissionFactor = 0.0;
+				int32 OtherMedium = Node.Medium;
+				FVector3d RefractedDirections[3];
+				if (bInterface)
+				{
+					OtherMedium = Triangle.MediumFront == Node.Medium ? Triangle.MediumBack : Triangle.MediumFront;
+					if (Triangle.MediumFront != Node.Medium && Triangle.MediumBack != Node.Medium)
+					{
+						// The beam believes it is in a medium the triangle does not border (inconsistent scene): decide by side.
+						const FVector3d EntryCentre = (Node.EndPoints[0] + Node.EndPoints[1] + Node.EndPoints[2]) / 3.0 - Node.Axis() * 1e-6;
+						OtherMedium = Triangle.SignedDistance(EntryCentre) > 0.0 ? Triangle.MediumBack : Triangle.MediumFront;
+					}
+					const FMedium& From = Scene.GetMedium(Node.Medium);
+					const FMedium& To = Scene.GetMedium(OtherMedium);
+					// Total internal reflection is decided for the beam by its axis (Sikora 2012, sec. 3.3.4: the incoming angle of
+					// the divided beam); guide rays of a refracting beam that lie beyond the critical angle are clamped to grazing.
+					FVector3d RefractedAxis;
+					const bool bTotalInternal = !RefractDirection(Node.Axis(), Node.HitPlane.Normal, From.SpeedOfSound, To.SpeedOfSound, RefractedAxis);
+					for (int32 I = 0; I < 3 && !bTotalInternal; ++I)
+					{
+						RefractDirection(Node.Directions[I], Node.HitPlane.Normal, From.SpeedOfSound, To.SpeedOfSound, RefractedDirections[I], MaxGuideRaySinRefracted);
+					}
+					const double R = bTotalInternal ? 1.0 : FMedium::ReflectionFactor(From, To);
+					TransmissionFactor = bTotalInternal ? 0.0 : 1.0 - R;
+					for (double& Value : ReflectionFactor)
+					{
+						Value = R;
+					}
+					if (bTotalInternal)
+					{
+						++Tree->NumTotalInternalReflections;
+						Tree->Nodes[Index].bTotalInternalReflection = true;
+					}
+				}
+				else
+				{
+					for (int32 Band = 0; Band < Acoustics::NumBands; ++Band)
+					{
+						ReflectionFactor[Band] = Material.Reflection(Band);
+					}
+				}
+
+				// The reflected beam is valid on the side of the surface the parent came from (HitPlane faces that side).
 				double MaxFactor = 0.0;
 				for (int32 Band = 0; Band < Acoustics::NumBands; ++Band)
 				{
-					Pending.Factor[Band] = Node.Factor[Band] * Material.Reflection(Band);
-					MaxFactor = FMath::Max(MaxFactor, Pending.Factor[Band]);
+					Reflected.Factor[Band] = Node.Factor[Band] * ReflectionFactor[Band];
+					MaxFactor = FMath::Max(MaxFactor, Reflected.Factor[Band]);
 				}
-				if (MaxFactor < Settings.EnergyThreshold)
+				if (MaxFactor >= Settings.EnergyThreshold)
 				{
-					continue;
+					bHasReflected = true;
+					Reflected.ReflectionPlane = Node.HitPlane;
+					Reflected.bHasReflectionPlane = true;
+					Reflected.ReflectionTriangle = Node.HitTriangle;
+					Reflected.Apex = MirrorPoint(Node.Apex, Node.HitPlane);
+					for (int32 I = 0; I < 3; ++I)
+					{
+						Reflected.Directions[I] = ReflectDirection(Node.Directions[I], Node.HitPlane.Normal);
+					}
+					Reflected.Order = Order;
+					Reflected.Parent = Index;
+					Reflected.RootBeam = Node.RootBeam;
+					Reflected.SequenceHash = CombineSequence(Node.SequenceHash, TriangleSurface[Node.HitTriangle]);
+					Reflected.Medium = Node.Medium;
+					Reflected.NumRefractions = Node.NumRefractions;
+					Reflected.bFocusAhead = Reflected.ReflectionPlane.SignedDistance(Reflected.Apex) > MinApexClearance;
 				}
-				// The reflected beam is valid on the side of the wall the parent came from (HitPlane faces the parent apex).
-				Pending.ReflectionPlane = Node.HitPlane;
-				Pending.bHasReflectionPlane = true;
-				Pending.ReflectionTriangle = Node.HitTriangle;
-				Pending.Apex = MirrorPoint(Node.Apex, Node.HitPlane);
-				for (int32 I = 0; I < 3; ++I)
+
+				// The refracted beam (SPEC §2.6): guide rays by Snell from the parent's cross-section on the interface,
+				// apex by least squares, valid beyond the interface on the other side. The factor carries T and the
+				// ratio (r1 / r_in)^2 of the apex distances to the start triangle (Sikora 2012 Eq. 6), so the energy
+				// density at the start triangle equals the incoming density times T whatever the new apex is.
+				if (bInterface && TransmissionFactor > 0.0)
 				{
-					Pending.Directions[I] = ReflectDirection(Node.Directions[I], Node.HitPlane.Normal);
+					const FVector3d Centre = (Node.EndPoints[0] + Node.EndPoints[1] + Node.EndPoints[2]) / 3.0;
+					FVector3d Apex;
+					const bool bConverged = LeastSquaresApex(MakeArrayView(Node.EndPoints, 3), MakeArrayView(RefractedDirections, 3), Apex);
+					const FAcousticPlane EntryPlane(-Node.HitPlane.Normal, Centre);
+					double ApexDistance = EntryPlane.SignedDistance(Apex);
+					if (!bConverged || FMath::Abs(ApexDistance) < MinApexClearance)
+					{
+						// Parallel guide rays (or an apex in the entry plane): a beam from far away.
+						const FVector3d Mean = (RefractedDirections[0] + RefractedDirections[1] + RefractedDirections[2]).GetSafeNormal();
+						Apex = Centre - Mean * ParallelApexDistance;
+						ApexDistance = EntryPlane.SignedDistance(Apex);
+						++Tree->NumParallelApexes;
+					}
+					const double RIn = (Node.Apex - Centre).Length();
+					const double R1 = (Apex - Centre).Length();
+					const double Spread = RIn > 1e-12 ? (R1 * R1) / (RIn * RIn) : 1.0;
+					MaxFactor = 0.0;
+					for (int32 Band = 0; Band < Acoustics::NumBands; ++Band)
+					{
+						Refracted.Factor[Band] = Node.Factor[Band] * TransmissionFactor * Spread;
+						MaxFactor = FMath::Max(MaxFactor, Refracted.Factor[Band]);
+					}
+					// The threshold compares energy densities at the start triangle, where the spread ratio is already folded in;
+					// test the physical transmitted share instead so a far apex (large r1) cannot keep a dead beam alive.
+					double TransmittedShare = 0.0;
+					for (int32 Band = 0; Band < Acoustics::NumBands; ++Band)
+					{
+						TransmittedShare = FMath::Max(TransmittedShare, Node.Factor[Band] * TransmissionFactor);
+					}
+					if (TransmittedShare >= Settings.EnergyThreshold && MaxFactor > 0.0)
+					{
+						bHasRefracted = true;
+						Refracted.Apex = Apex;
+						for (int32 I = 0; I < 3; ++I)
+						{
+							Refracted.Directions[I] = RefractedDirections[I];
+						}
+						Refracted.ReflectionPlane = EntryPlane;
+						Refracted.bHasReflectionPlane = true;
+						Refracted.ReflectionTriangle = Node.HitTriangle;
+						Refracted.Order = Order;
+						Refracted.Parent = Index;
+						Refracted.RootBeam = Node.RootBeam;
+						Refracted.SequenceHash = CombineSequence(Node.SequenceHash, TriangleSurface[Node.HitTriangle], true);
+						Refracted.Medium = OtherMedium;
+						Refracted.NumRefractions = Node.NumRefractions + 1;
+						Refracted.bRefracted = true;
+						Refracted.bFocusAhead = ApexDistance > 0.0;
+						++Tree->NumRefracted;
+					}
 				}
-				Pending.Order = Order;
-				Pending.Parent = Index;
-				Pending.RootBeam = Node.RootBeam;
-				Pending.SequenceHash = CombineSequence(Node.SequenceHash, TriangleSurface[Node.HitTriangle]);
 			}
-			if (!Builder.Divide(Pending))
+			if (bHasReflected && !Builder.Divide(Reflected))
+			{
+				break;
+			}
+			if (bHasRefracted && !Builder.Divide(Refracted))
 			{
 				break;
 			}
@@ -920,9 +1377,12 @@ TSharedPtr<FBeamTree> FBeamTracer::BuildTree(const FAcousticScene& Scene, const 
 
 void FBeamTracer::QueryReceivers(const FAcousticScene& Scene, const FBeamTree& Tree, TConstArrayView<FSolverReceiver> Receivers, const FBeamTracerSettings& Settings, FSimulationResult& Result)
 {
-	const double SpeedOfSound = Scene.GetMedium(0).SpeedOfSound;
+	const double SpeedOfSound = Scene.GetMedium(Tree.SourceMedium).SpeedOfSound;
+	const FVector3d ConeAxis = Settings.SourceDirection.GetSafeNormal();
+	const double ConeCos = FMath::Cos(FMath::DegreesToRadians(FMath::Clamp(Settings.SourceConeHalfAngleDeg, 0.0, 180.0)));
 	Result.Receivers.SetNum(Receivers.Num());
 	TArray<FBeamContribution> Contributions;
+	TArray<int32> SegmentMedia;
 	for (int32 ReceiverIndex = 0; ReceiverIndex < Receivers.Num(); ++ReceiverIndex)
 	{
 		const FSolverReceiver& Receiver = Receivers[ReceiverIndex];
@@ -949,14 +1409,16 @@ void FBeamTracer::QueryReceivers(const FAcousticScene& Scene, const FBeamTree& T
 			FEarlyReflection Reflection;
 			Reflection.Order = Contribution.Order;
 			Reflection.Distance = Distance;
-			Reflection.TimeSeconds = Distance / SpeedOfSound;
 			Reflection.ImageSource = Node.Apex;
 			Reflection.BeamNode = Contribution.Node;
 			for (int32 Band = 0; Band < Acoustics::NumBands; ++Band)
 			{
 				Reflection.Energy[Band] = Node.Factor[Band] * Spread * (Settings.bAirAbsorption ? FMath::Exp(-Settings.AirAbsorption[Band] * Distance) : 1.0);
 			}
-			Tree.TracePath(Contribution.Node, Receiver.Position, Reflection.Path, Reflection.Triangles);
+			// Delay along the actual path with the speed of sound of every medium (SPEC §2.6); without refraction the path
+			// length equals the apex distance (mirror images) and the delay is d / c.
+			Tree.TracePath(Contribution.Node, Receiver.Position, Reflection.Path, Reflection.Triangles, &SegmentMedia);
+			Reflection.TimeSeconds = Node.NumRefractions > 0 ? FBeamTree::PathDelaySeconds(Scene, Reflection.Path, SegmentMedia) : Distance / SpeedOfSound;
 			Out.Histogram.AddEnergy(Reflection.TimeSeconds, Reflection.Energy);
 			Out.EarlyReflections.Add(MoveTemp(Reflection));
 		}
@@ -966,6 +1428,10 @@ void FBeamTracer::QueryReceivers(const FAcousticScene& Scene, const FBeamTree& T
 		Out.DirectDistance = (Out.Position - Tree.Source).Length();
 		Out.DirectArrivalSeconds = Out.DirectDistance / SpeedOfSound;
 		Out.bDirectOccluded = Scene.IsOccluded(Tree.Source, Out.Position);
+		if (Settings.bDirectionalSource && !ConeAxis.IsNearlyZero() && FVector3d::DotProduct((Out.Position - Tree.Source).GetSafeNormal(), ConeAxis) < ConeCos)
+		{
+			Out.bDirectOccluded = true; // outside the cone of a directional source
+		}
 		if (Settings.bAnalyticDirectSound && !Out.bDirectOccluded)
 		{
 			const double Distance2 = FMath::Max(Out.DirectDistance * Out.DirectDistance, 1e-12);

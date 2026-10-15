@@ -8,14 +8,15 @@
 class UMaterialInterface;
 struct FReceiverResult;
 
-/** Metric shown on the tiles (SPEC §3.6: direct-sound SPL, C80, T30, EDT). */
+/** Metric shown on the tiles (SPEC §3.6: direct-sound SPL, C80, T30, EDT; M6 adds the level of all arrivals for the lens focus). */
 UENUM(BlueprintType)
 enum class EHeatmapMetric : uint8
 {
 	DirectSPL UMETA(DisplayName = "Direct SPL"),
 	C80,
 	T30,
-	EDT
+	EDT,
+	TotalLevel UMETA(DisplayName = "Total level")
 };
 
 /** What one tile remembers of its receiver result, so the metric can be switched without the result. */
@@ -47,6 +48,13 @@ struct FHeatmapSample
 
 	UPROPERTY(VisibleAnywhere, Category = "Acoustics")
 	bool bEDTValid = false;
+
+	/** Level of the whole energy histogram (direct + every arrival), same reference as DirectSPL. */
+	UPROPERTY(VisibleAnywhere, Category = "Acoustics")
+	float TotalLevel = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, Category = "Acoustics")
+	bool bTotalValid = false;
 };
 
 /**

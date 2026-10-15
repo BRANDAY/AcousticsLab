@@ -10,6 +10,7 @@
 #include "AcousticSimulationManager.generated.h"
 
 struct FAcousticScene;
+class AAcousticSource;
 class AReceiverGrid;
 class UAuralizationComponent;
 class UBeamVisualizerComponent;
@@ -184,6 +185,12 @@ public:
 
 	/** Source position (meters), receivers of the world (point receivers first, then grid tiles) and their bindings; false with a message when one of them is missing. */
 	bool CollectSceneActors(FVector3d& OutSource, TArray<FSolverReceiver>& OutReceivers, TArray<FReceiverBinding>& OutBindings, FString& OutError) const;
+
+	/** The source actor of the next run: the one named by SourceId, else the first by id; nullptr without sources. */
+	AAcousticSource* ResolveSourceActor() const;
+
+	/** Names of the sources of the level (sorted), for the HUD selector. */
+	TArray<FName> GetSourceIds() const;
 
 	/** Indices into the last result's receivers that are point receivers (every receiver when the bindings are unknown). */
 	TArray<int32> GetPointReceiverIndices() const;

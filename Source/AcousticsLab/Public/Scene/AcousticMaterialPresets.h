@@ -18,7 +18,7 @@ namespace AcousticMaterialPresets
 		FString Description;
 	};
 
-	/** Concrete, Plaster, Wood, Audience, WaterSurface, Absorber. */
+	/** Concrete, Plaster, Wood, Audience, WaterSurface, Absorber, Interface. */
 	ACOUSTICSLAB_API TConstArrayView<FPreset> All();
 
 	/** Case-insensitive lookup; nullptr when unknown. */

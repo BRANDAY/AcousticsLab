@@ -95,6 +95,29 @@ UDynamicMeshComponent* UBeamVisualizerComponent::GetOrCreateMesh(int32 Order)
 	return Mesh;
 }
 
+FLinearColor UBeamVisualizerComponent::ColorForOrderAndMedium(int32 Order, int32 Medium)
+{
+	if (Medium <= 0)
+	{
+		return URayPathVisualizerComponent::ColorForOrder(Order);
+	}
+	FLinearColor Color;
+	switch (Order)
+	{
+	case 0: Color = FLinearColor(0.35f, 0.95f, 1.0f); break;
+	case 1: Color = FLinearColor(0.15f, 0.55f, 1.0f); break;
+	case 2: Color = FLinearColor(0.45f, 0.25f, 1.0f); break;
+	default: Color = FLinearColor(0.85f, 0.15f, 0.95f); break;
+	}
+	if (Medium > 1)
+	{
+		FLinearColor Hsv = Color.LinearRGBToHSV();
+		Hsv.R = FMath::Fmod(Hsv.R + 70.0f * (Medium - 1), 360.0f);
+		Color = Hsv.HSVToLinearRGB();
+	}
+	return Color;
+}
+
 bool UBeamVisualizerComponent::HasTree() const
 {
 	return Result.IsValid() && Result->bSuccess && Result->BeamTree.IsValid() && Result->BeamTree->Nodes.Num() > 0;
@@ -301,13 +324,21 @@ void UBeamVisualizerComponent::Rebuild()
 		{
 			continue;
 		}
+		if (!bDrawEscapedBeams && Node.HitTriangle == INDEX_NONE)
+		{
+			continue;
+		}
 		++NumMatchingBeams;
 		if (DrawnPerOrder[Node.Order] >= MaxBeamsPerOrder)
 		{
 			continue;
 		}
-		const FLinearColor Base = URayPathVisualizerComponent::ColorForOrder(Node.Order);
-		const float Alpha = bOnlyBeamsContainingReceiver ? HighlightOpacity : Opacity;
+		const FLinearColor Base = ColorForOrderAndMedium(Node.Order, Node.Medium);
+		float Alpha = bOnlyBeamsContainingReceiver ? HighlightOpacity : Opacity;
+		if (Node.bRefracted)
+		{
+			Alpha = FMath::Min(1.0f, Alpha * RefractedOpacityScale);
+		}
 		AppendFrustum(Meshes[Node.Order], Node, FVector4f(Base.R, Base.G, Base.B, Alpha), bDrawStartCaps && Node.Order > 0, NumTriangles);
 		++DrawnPerOrder[Node.Order];
 		++NumDrawnBeams;

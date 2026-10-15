@@ -65,6 +65,7 @@ FText UHeatmapComponent::MetricLabel(EHeatmapMetric InMetric)
 	case EHeatmapMetric::C80: return LOCTEXT("C80", "C80");
 	case EHeatmapMetric::T30: return LOCTEXT("T30", "T30");
 	case EHeatmapMetric::EDT: return LOCTEXT("EDT", "EDT");
+	case EHeatmapMetric::TotalLevel: return LOCTEXT("TotalLevel", "Total level");
 	default: return FText::GetEmpty();
 	}
 }
@@ -77,6 +78,7 @@ FString UHeatmapComponent::MetricUnits(EHeatmapMetric InMetric)
 	case EHeatmapMetric::C80: return TEXT("dB");
 	case EHeatmapMetric::T30: return TEXT("s");
 	case EHeatmapMetric::EDT: return TEXT("s");
+	case EHeatmapMetric::TotalLevel: return TEXT("dB");
 	default: return FString();
 	}
 }
@@ -94,6 +96,9 @@ FHeatmapSample UHeatmapComponent::MakeSample(const FReceiverResult& Receiver, do
 	Sample.T30 = static_cast<float>(Band.T30);
 	Sample.bEDTValid = Band.bEDTValid;
 	Sample.EDT = static_cast<float>(Band.EDT);
+	const double Total = RoomAcoustics::DirectSoundLevelDb(Receiver.Histogram.TotalEnergy(0), Receiver.Radius, InSourcePowerLevelDb);
+	Sample.bTotalValid = Total > RoomAcoustics::SilenceDb;
+	Sample.TotalLevel = Sample.bTotalValid ? static_cast<float>(Total) : 0.0f;
 	return Sample;
 }
 
@@ -105,6 +110,7 @@ bool UHeatmapComponent::SampleValue(const FHeatmapSample& Sample, EHeatmapMetric
 	case EHeatmapMetric::C80: OutValue = Sample.C80; return Sample.bC80Valid;
 	case EHeatmapMetric::T30: OutValue = Sample.T30; return Sample.bT30Valid;
 	case EHeatmapMetric::EDT: OutValue = Sample.EDT; return Sample.bEDTValid;
+	case EHeatmapMetric::TotalLevel: OutValue = Sample.TotalLevel; return Sample.bTotalValid;
 	default: OutValue = 0.0f; return false;
 	}
 }

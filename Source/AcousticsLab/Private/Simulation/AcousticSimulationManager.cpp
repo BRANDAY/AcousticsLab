@@ -11,6 +11,7 @@
 #include "Levels/LevelSetupActor.h"
 #include "Levels/ShoeboxRoomActor.h"
 #include "Results/RoomMetrics.h"
+#include "Scene/AcousticMediumPresets.h"
 #include "Scene/AcousticReceiver.h"
 #include "Scene/AcousticSource.h"
 #include "Scene/ReceiverGrid.h"
@@ -105,26 +106,42 @@ AAcousticSimulationManager* AAcousticSimulationManager::FindOrSpawn(UWorld* Worl
 	return Spawned;
 }
 
-bool AAcousticSimulationManager::CollectSceneActors(FVector3d& OutSource, TArray<FSolverReceiver>& OutReceivers, TArray<FReceiverBinding>& OutBindings, FString& OutError) const
+AAcousticSource* AAcousticSimulationManager::ResolveSourceActor() const
 {
-	UWorld* World = GetWorld();
-	const TArray<AAcousticSource*> Sources = AAcousticSource::FindAll(World);
+	const TArray<AAcousticSource*> Sources = AAcousticSource::FindAll(GetWorld());
 	if (Sources.IsEmpty())
 	{
-		OutError = TEXT("the level has no AAcousticSource");
-		return false;
+		return nullptr;
 	}
-	const AAcousticSource* Source = Sources[0];
 	if (!SourceId.IsNone())
 	{
 		if (AAcousticSource* const* Named = Sources.FindByPredicate([this](const AAcousticSource* Candidate) { return Candidate->SourceId == SourceId; }))
 		{
-			Source = *Named;
+			return *Named;
 		}
-		else
-		{
-			UE_LOG(LogAcoustics, Warning, TEXT("Source '%s' not found, using '%s'"), *SourceId.ToString(), *Source->SourceId.ToString());
-		}
+		UE_LOG(LogAcoustics, Warning, TEXT("Source '%s' not found, using '%s'"), *SourceId.ToString(), *Sources[0]->SourceId.ToString());
+	}
+	return Sources[0];
+}
+
+TArray<FName> AAcousticSimulationManager::GetSourceIds() const
+{
+	TArray<FName> Ids;
+	for (const AAcousticSource* Source : AAcousticSource::FindAll(GetWorld()))
+	{
+		Ids.Add(Source->SourceId);
+	}
+	return Ids;
+}
+
+bool AAcousticSimulationManager::CollectSceneActors(FVector3d& OutSource, TArray<FSolverReceiver>& OutReceivers, TArray<FReceiverBinding>& OutBindings, FString& OutError) const
+{
+	UWorld* World = GetWorld();
+	const AAcousticSource* Source = ResolveSourceActor();
+	if (!Source)
+	{
+		OutError = TEXT("the level has no AAcousticSource");
+		return false;
 	}
 	OutSource = Source->GetPositionMeters();
 
@@ -336,7 +353,38 @@ bool AAcousticSimulationManager::Run()
 
 	const FRayTracerSettings RayTracerSettings = Settings.ToRayTracerSettings();
 	const FImageSourceSettings ImageSourceSettings = Settings.ToImageSourceSettings();
-	const FBeamTracerSettings BeamTracerSettings = Settings.ToBeamTracerSettings();
+	FBeamTracerSettings BeamTracerSettings = Settings.ToBeamTracerSettings();
+	FString SourceNote;
+	if (const AAcousticSource* SourceActor = ResolveSourceActor())
+	{
+		// Medium of the source (SPEC §2.6) and its directivity (the unidirectional source of the lens test, Sikora 2012).
+		BeamTracerSettings.SourceMedium = 0;
+		if (!SourceActor->MediumName.IsNone())
+		{
+			int32 MediumId = Scene->FindMedium(SourceActor->MediumName.ToString());
+			if (MediumId == INDEX_NONE)
+			{
+				FMedium Medium;
+				const ALevelSetupActor* Setup = ALevelSetupActor::Find(GetWorld());
+				const bool bKnown = Setup && Setup->SceneExtractor ? Setup->SceneExtractor->FindMedium(SourceActor->MediumName, Medium) : AcousticMediumPresets::Find(SourceActor->MediumName, Medium);
+				if (bKnown)
+				{
+					MediumId = Scene->FindOrAddMedium(Medium);
+				}
+				else
+				{
+					UE_LOG(LogAcoustics, Warning, TEXT("Source %s: unknown medium '%s', using %s"), *SourceActor->SourceId.ToString(), *SourceActor->MediumName.ToString(), *Scene->Media[0].Name);
+					MediumId = 0;
+				}
+			}
+			BeamTracerSettings.SourceMedium = MediumId;
+		}
+		BeamTracerSettings.bDirectionalSource = SourceActor->bDirectional;
+		BeamTracerSettings.SourceDirection = SourceActor->GetDirection();
+		BeamTracerSettings.SourceConeHalfAngleDeg = SourceActor->ConeHalfAngleDeg;
+		SourceNote = FString::Printf(TEXT("source %s in %s%s"), *SourceActor->SourceId.ToString(), *Scene->GetMedium(BeamTracerSettings.SourceMedium).Name,
+			SourceActor->bDirectional ? *FString::Printf(TEXT(", cone %.1f deg"), SourceActor->ConeHalfAngleDeg) : TEXT(""));
+	}
 	bool bValid = true;
 	switch (Effective)
 	{
@@ -383,12 +431,12 @@ bool AAcousticSimulationManager::Run()
 	{
 		NumGridReceivers += Binding.Kind == EReceiverBindingKind::GridTile ? 1 : 0;
 	}
-	UE_LOG(LogAcoustics, Log, TEXT("Simulation run %d started (%s): %s; %d receivers (%d grid tiles); scene %s"), RunCount, *UAcousticSimulationSubsystem::SolverName(Effective), *Settings.ToString(Effective), PendingBindings.Num(), NumGridReceivers, *Scene->DescribeStats());
+	UE_LOG(LogAcoustics, Log, TEXT("Simulation run %d started (%s): %s; %s; %d receivers (%d grid tiles); scene %s"), RunCount, *UAcousticSimulationSubsystem::SolverName(Effective), *Settings.ToString(Effective), *SourceNote, PendingBindings.Num(), NumGridReceivers, *Scene->DescribeStats());
 	FString Activity;
 	switch (Effective)
 	{
 	case EAcousticSolver::ImageSource: Activity = FString::Printf(TEXT("Image sources up to order %d..."), Settings.ImageSourceOrder); break;
-	case EAcousticSolver::BeamTracer: Activity = FString::Printf(TEXT("Tracing %d beams up to order %d..."), FBeamTracerSettings::NumRootBeams(Settings.SubdivisionLevel), Settings.MaxBeamOrder); break;
+	case EAcousticSolver::BeamTracer: Activity = FString::Printf(TEXT("Tracing %d beams up to order %d%s..."), FBeamTracerSettings::NumRootBeams(Settings.SubdivisionLevel), Settings.MaxBeamOrder, BeamTracerSettings.bRefraction && Scene->HasInterfaces() ? TEXT(" with refraction") : TEXT("")); break;
 	default: Activity = FString::Printf(TEXT("Tracing %d rays..."), Settings.NumRays); break;
 	}
 	SetState(ESimulationState::Running, Activity + SolverNote);

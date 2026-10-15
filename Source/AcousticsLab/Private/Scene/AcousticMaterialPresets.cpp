@@ -24,6 +24,7 @@ namespace AcousticMaterialPresets
 			MakePreset(TEXT("Audience"), 0.70, 0.60, false, FLinearColor(0.60f, 0.10f, 0.10f), TEXT("Seated audience (SPEC 0.6-0.8); strongly scattering.")),
 			MakePreset(TEXT("WaterSurface"), 0.01, 0.05, true, FLinearColor(0.10f, 0.40f, 0.90f), TEXT("Air/water interface: from the air side almost total reflection (R = 0.999 by impedances); refraction uses the media (M6).")),
 			MakePreset(TEXT("Absorber"), 0.90, 0.20, false, FLinearColor(0.10f, 0.10f, 0.10f), TEXT("Porous absorber / velarium canopy.")),
+			MakePreset(TEXT("Interface"), 0.00, 0.00, true, FLinearColor(0.30f, 0.80f, 1.00f), TEXT("Boundary between two media (the lens of M6): energy split by the impedances only, no absorption.")),
 		};
 		return Presets;
 	}

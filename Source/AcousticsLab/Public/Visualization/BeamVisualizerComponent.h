@@ -16,7 +16,9 @@ struct FBeamNode;
  * UDynamicMeshComponent (Engine/Source/Runtime/GeometryFramework/Public/Components/DynamicMeshComponent.h) with
  * per-vertex colors (order color, alpha = Opacity) rendered through M_BeamFrustum (unlit, translucent, two-sided).
  * "Only beams containing the receiver" draws the beams of FReceiverResult::ContainingBeamNodes of the filtered
- * receiver together with their ancestors (the chain of reflections that led there). Meters -> centimeters here only.
+ * receiver together with their ancestors (the chain of reflections that led there). Beams are colored by order in
+ * medium 0 and by a second palette in every other medium (SPEC §3.6: the beam before and after an interface in
+ * different colors); refracted beams are drawn a little more opaque. Meters -> centimeters here only.
  */
 UCLASS(ClassGroup = (Acoustics), meta = (BlueprintSpawnableComponent))
 class ACOUSTICSLAB_API UBeamVisualizerComponent : public UActorComponent
@@ -41,6 +43,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Acoustics|Beams")
 	bool bOnlyBeamsContainingReceiver = false;
 
+	/** Also draw the beams that leave the scene (they extend EscapeLength past the last surface and fill an open scene). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Acoustics|Beams")
+	bool bDrawEscapedBeams = true;
+
 	/** Receiver index in the result for the containment filter; -1 = any receiver. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Acoustics|Beams", meta = (ClampMin = "-1"))
 	int32 ReceiverFilter = INDEX_NONE;
@@ -55,6 +61,10 @@ public:
 	/** Beams containing the receiver are drawn with this opacity when the filter is on. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Acoustics|Beams", meta = (ClampMin = "0.02", ClampMax = "1.0"))
 	float HighlightOpacity = 0.55f;
+
+	/** Opacity multiplier of beams produced by a refraction (M6), so the transmitted beams stand out from the reflected ones. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Acoustics|Beams", meta = (ClampMin = "0.5", ClampMax = "4.0"))
+	float RefractedOpacityScale = 1.8f;
 
 	/** Also draw the start cross-section of reflected beams (the patch on the wall). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Acoustics|Beams")
@@ -98,6 +108,10 @@ public:
 
 	/** Highest order present in the result's tree, -1 without a tree. */
 	int32 GetTreeMaxOrder() const;
+
+	/** Order palette of URayPathVisualizerComponent in medium 0; cyan / blue / violet / magenta by order in medium 1, hue-shifted further for every other medium. */
+	UFUNCTION(BlueprintPure, Category = "Acoustics|Beams")
+	static FLinearColor ColorForOrderAndMedium(int32 Order, int32 Medium);
 
 	bool HasTree() const;
 

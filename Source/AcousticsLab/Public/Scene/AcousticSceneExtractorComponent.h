@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Geometry/Medium.h"
 #include "AcousticSceneExtractorComponent.generated.h"
 
 class UAcousticMaterialAsset;
@@ -10,6 +11,33 @@ class UDynamicMesh;
 class UPrimitiveComponent;
 class UStaticMesh;
 struct FAcousticScene;
+
+/** A propagation medium by name (SPEC §2.6), for media that are not built-in presets (Air, Water, Glycerol, Rubber). */
+USTRUCT(BlueprintType)
+struct ACOUSTICSLAB_API FAcousticMediumSpec
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = "Acoustics")
+	FName Name;
+
+	/** Speed of sound, m/s. */
+	UPROPERTY(EditAnywhere, Category = "Acoustics", meta = (ClampMin = "1.0"))
+	float SpeedOfSound = 343.0f;
+
+	/** Density, kg/m^3. */
+	UPROPERTY(EditAnywhere, Category = "Acoustics", meta = (ClampMin = "0.001"))
+	float Density = 1.2f;
+};
+
+/** What the extractor resolved for one mesh component: material and, for interfaces, the media on both sides. */
+struct FAcousticSurfaceSpec
+{
+	int32 MaterialId = 0;
+	bool bInterface = false;
+	int32 MediumFront = 0;
+	int32 MediumBack = 0;
+};
 
 /** What an extraction found. Logged by "Log Extracted Scene", shown in the HUD from M2 on. */
 USTRUCT(BlueprintType)
@@ -43,6 +71,13 @@ struct ACOUSTICSLAB_API FAcousticExtractionStats
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics")
 	int32 NumMaterials = 0;
 
+	/** Triangles of interface meshes (tag "Interface" or an interface material) and media of the scene (medium 0 = air). */
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics")
+	int32 NumInterfaceTriangles = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics")
+	int32 NumMedia = 1;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics")
 	double TotalAreaM2 = 0.0;
 
@@ -70,6 +105,11 @@ struct ACOUSTICSLAB_API FAcousticExtractionStats
  * Material of a component: tag "AcMat:<name>" on the component, else on its actor, else MaterialByMeshName
  * (static mesh asset name, actor name or label), else DefaultMaterial (Concrete). A name resolves to the asset of
  * that MaterialName in MaterialLibrary / DefaultMaterial, else to the built-in preset of that name.
+ *
+ * Interfaces between media (SPEC §2.6, M6): a component (or actor) tagged InterfaceTag ("Interface"), or whose material
+ * has bInterface, yields interface triangles; the media are named by the tags "AcMediumFront:<name>" (the side the UE
+ * face normal points to) and "AcMediumBack:<name>", resolved through MediaLibrary or AcousticMediumPresets; medium 0 is
+ * always Air. Without medium tags an interface gets front Air / back Water with a warning.
  */
 UCLASS(ClassGroup = (Acoustics), meta = (BlueprintSpawnableComponent))
 class ACOUSTICSLAB_API UAcousticSceneExtractorComponent : public UActorComponent
@@ -99,6 +139,28 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Acoustics|Materials")
 	TMap<FName, TObjectPtr<UAcousticMaterialAsset>> MaterialByMeshName;
 
+	/** Components (or actors) carrying this tag are boundaries between two media. */
+	UPROPERTY(EditAnywhere, Category = "Acoustics|Media")
+	FName InterfaceTag;
+
+	/** Prefixes of the medium tags, followed by the medium name. */
+	UPROPERTY(EditAnywhere, Category = "Acoustics|Media")
+	FString MediumFrontTagPrefix;
+
+	UPROPERTY(EditAnywhere, Category = "Acoustics|Media")
+	FString MediumBackTagPrefix;
+
+	/** Media resolvable by name besides the presets Air, Water, Glycerol, Rubber. */
+	UPROPERTY(EditAnywhere, Category = "Acoustics|Media")
+	TArray<FAcousticMediumSpec> MediaLibrary;
+
+	/** Media of an interface without medium tags. */
+	UPROPERTY(EditAnywhere, Category = "Acoustics|Media")
+	FName DefaultInterfaceFrontMedium;
+
+	UPROPERTY(EditAnywhere, Category = "Acoustics|Media")
+	FName DefaultInterfaceBackMedium;
+
 	UPROPERTY(EditAnywhere, Category = "Acoustics")
 	bool bIncludeDynamicMeshes = true;
 
@@ -120,15 +182,21 @@ public:
 	bool ExtractFromWorld(UWorld* World, FAcousticScene& OutScene, FAcousticExtractionStats& OutStats) const;
 
 	/** Appends LOD0 of a static mesh placed with ToWorld (UE units). Returns the number of triangles added. */
+	static int32 AppendStaticMesh(const UStaticMesh* Mesh, const FTransform& ToWorld, const FAcousticSurfaceSpec& Surface, FAcousticScene& Scene, FAcousticExtractionStats& Stats);
 	static int32 AppendStaticMesh(const UStaticMesh* Mesh, const FTransform& ToWorld, int32 MaterialId, FAcousticScene& Scene, FAcousticExtractionStats& Stats);
 
+	static int32 AppendDynamicMesh(const UDynamicMesh* Mesh, const FTransform& ToWorld, const FAcousticSurfaceSpec& Surface, FAcousticScene& Scene, FAcousticExtractionStats& Stats);
 	static int32 AppendDynamicMesh(const UDynamicMesh* Mesh, const FTransform& ToWorld, int32 MaterialId, FAcousticScene& Scene, FAcousticExtractionStats& Stats);
 
 	/**
 	 * Appends one triangle given in world centimeters with UE winding (front normal (P2 - P0) x (P1 - P0)).
 	 * bMirrored: the placing transform has a negative determinant, which reverses the winding once more.
 	 */
+	static int32 AppendUETriangle(const FVector& P0, const FVector& P1, const FVector& P2, bool bMirrored, const FAcousticSurfaceSpec& Surface, FAcousticScene& Scene, FAcousticExtractionStats& Stats);
 	static int32 AppendUETriangle(const FVector& P0, const FVector& P1, const FVector& P2, bool bMirrored, int32 MaterialId, FAcousticScene& Scene, FAcousticExtractionStats& Stats);
+
+	/** Medium by name: MediaLibrary, then the presets. False when unknown. */
+	bool FindMedium(FName Name, FMedium& OutMedium) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Acoustics")
 	bool IsAcousticComponent(const UPrimitiveComponent* Component) const;
@@ -142,6 +210,9 @@ public:
 
 private:
 	bool FindMaterialTag(const TArray<FName>& Tags, FName& OutName) const;
+	static bool FindPrefixedTag(const TArray<FName>& Tags, const FString& Prefix, FName& OutName);
 	const UAcousticMaterialAsset* FindMaterialAsset(FName Name) const;
 	int32 ResolveMaterialId(const UPrimitiveComponent* Component, const UStaticMesh* Mesh, FAcousticScene& Scene, TMap<FName, int32>& MaterialIds, FAcousticExtractionStats& Stats) const;
+	int32 ResolveMediumId(const UPrimitiveComponent* Component, FName Name, FAcousticScene& Scene, TMap<FName, int32>& MediumIds, FAcousticExtractionStats& Stats) const;
+	FAcousticSurfaceSpec ResolveSurface(const UPrimitiveComponent* Component, const UStaticMesh* Mesh, FAcousticScene& Scene, TMap<FName, int32>& MaterialIds, TMap<FName, int32>& MediumIds, FAcousticExtractionStats& Stats) const;
 };

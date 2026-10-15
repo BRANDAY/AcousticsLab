@@ -13,14 +13,15 @@
 #include "Geometry/AcousticScene.h"
 #include "Scene/AcousticMaterialAsset.h"
 #include "Scene/AcousticMaterialPresets.h"
+#include "Scene/AcousticMediumPresets.h"
 #include "StaticMeshResources.h"
 #include "UDynamicMesh.h"
 
 FString FAcousticExtractionStats::ToString() const
 {
 	FString Result = FString::Printf(
-		TEXT("%d triangles (%d degenerate skipped), %.3f m^2, %d materials; %d actors, %d static mesh components (%d instances), %d dynamic mesh components, %d skipped; bounds (%.2f %.2f %.2f)-(%.2f %.2f %.2f) m; %.1f ms"),
-		NumTriangles, NumDegenerateTriangles, TotalAreaM2, NumMaterials, NumActors, NumStaticMeshComponents, NumInstances, NumDynamicMeshComponents, NumSkippedComponents,
+		TEXT("%d triangles (%d degenerate skipped, %d interface), %.3f m^2, %d materials, %d media; %d actors, %d static mesh components (%d instances), %d dynamic mesh components, %d skipped; bounds (%.2f %.2f %.2f)-(%.2f %.2f %.2f) m; %.1f ms"),
+		NumTriangles, NumDegenerateTriangles, NumInterfaceTriangles, TotalAreaM2, NumMaterials, NumMedia, NumActors, NumStaticMeshComponents, NumInstances, NumDynamicMeshComponents, NumSkippedComponents,
 		BoundsMinMeters.X, BoundsMinMeters.Y, BoundsMinMeters.Z, BoundsMaxMeters.X, BoundsMaxMeters.Y, BoundsMaxMeters.Z, ExtractionMilliseconds);
 	for (const FString& Warning : Warnings)
 	{
@@ -32,6 +33,11 @@ FString FAcousticExtractionStats::ToString() const
 UAcousticSceneExtractorComponent::UAcousticSceneExtractorComponent()
 	: AcousticTag(TEXT("Acoustic"))
 	, MaterialTagPrefix(TEXT("AcMat:"))
+	, InterfaceTag(TEXT("Interface"))
+	, MediumFrontTagPrefix(TEXT("AcMediumFront:"))
+	, MediumBackTagPrefix(TEXT("AcMediumBack:"))
+	, DefaultInterfaceFrontMedium(TEXT("Air"))
+	, DefaultInterfaceBackMedium(TEXT("Water"))
 {
 	PrimaryComponentTick.bCanEverTick = false;
 }
@@ -93,6 +99,8 @@ bool UAcousticSceneExtractorComponent::ExtractFromWorld(UWorld* World, FAcoustic
 	OutScene.Materials[0] = DefaultProps;
 	TMap<FName, int32> MaterialIds;
 	MaterialIds.Add(FName(*DefaultProps.Name), 0);
+	TMap<FName, int32> MediumIds;
+	MediumIds.Add(FName(*OutScene.Media[0].Name), 0);
 
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
@@ -125,7 +133,7 @@ bool UAcousticSceneExtractorComponent::ExtractFromWorld(UWorld* World, FAcoustic
 					OutStats.Warnings.Add(FString::Printf(TEXT("%s: no static mesh assigned"), *DescribeComponent(Primitive)));
 					continue;
 				}
-				const int32 MaterialId = ResolveMaterialId(Primitive, Mesh, OutScene, MaterialIds, OutStats);
+				const FAcousticSurfaceSpec Surface = ResolveSurface(Primitive, Mesh, OutScene, MaterialIds, MediumIds, OutStats);
 				++OutStats.NumStaticMeshComponents;
 				if (const UInstancedStaticMeshComponent* Instanced = Cast<UInstancedStaticMeshComponent>(StaticMeshComponent))
 				{
@@ -135,14 +143,14 @@ bool UAcousticSceneExtractorComponent::ExtractFromWorld(UWorld* World, FAcoustic
 						FTransform InstanceToWorld;
 						if (Instanced->GetInstanceTransform(Instance, InstanceToWorld, true))
 						{
-							AppendStaticMesh(Mesh, InstanceToWorld, MaterialId, OutScene, OutStats);
+							AppendStaticMesh(Mesh, InstanceToWorld, Surface, OutScene, OutStats);
 							++OutStats.NumInstances;
 						}
 					}
 				}
 				else
 				{
-					AppendStaticMesh(Mesh, StaticMeshComponent->GetComponentTransform(), MaterialId, OutScene, OutStats);
+					AppendStaticMesh(Mesh, StaticMeshComponent->GetComponentTransform(), Surface, OutScene, OutStats);
 				}
 			}
 			else if (UDynamicMeshComponent* DynamicMeshComponent = Cast<UDynamicMeshComponent>(Primitive))
@@ -152,9 +160,9 @@ bool UAcousticSceneExtractorComponent::ExtractFromWorld(UWorld* World, FAcoustic
 					++OutStats.NumSkippedComponents;
 					continue;
 				}
-				const int32 MaterialId = ResolveMaterialId(Primitive, nullptr, OutScene, MaterialIds, OutStats);
+				const FAcousticSurfaceSpec Surface = ResolveSurface(Primitive, nullptr, OutScene, MaterialIds, MediumIds, OutStats);
 				++OutStats.NumDynamicMeshComponents;
-				AppendDynamicMesh(DynamicMeshComponent->GetDynamicMesh(), DynamicMeshComponent->GetComponentTransform(), MaterialId, OutScene, OutStats);
+				AppendDynamicMesh(DynamicMeshComponent->GetDynamicMesh(), DynamicMeshComponent->GetComponentTransform(), Surface, OutScene, OutStats);
 			}
 			else
 			{
@@ -172,6 +180,12 @@ bool UAcousticSceneExtractorComponent::ExtractFromWorld(UWorld* World, FAcoustic
 	OutStats.NumTriangles = OutScene.NumTriangles();
 	OutStats.TotalAreaM2 = OutScene.TotalArea();
 	OutStats.NumMaterials = OutScene.Materials.Num();
+	OutStats.NumMedia = OutScene.Media.Num();
+	OutStats.NumInterfaceTriangles = 0;
+	for (const FAcousticTriangle& Triangle : OutScene.Triangles)
+	{
+		OutStats.NumInterfaceTriangles += Triangle.bInterface ? 1 : 0;
+	}
 	const FBox3d Bounds = OutScene.ComputeBounds();
 	if (Bounds.IsValid)
 	{
@@ -184,13 +198,23 @@ bool UAcousticSceneExtractorComponent::ExtractFromWorld(UWorld* World, FAcoustic
 
 int32 UAcousticSceneExtractorComponent::AppendUETriangle(const FVector& P0, const FVector& P1, const FVector& P2, bool bMirrored, int32 MaterialId, FAcousticScene& Scene, FAcousticExtractionStats& Stats)
 {
+	FAcousticSurfaceSpec Surface;
+	Surface.MaterialId = MaterialId;
+	return AppendUETriangle(P0, P1, P2, bMirrored, Surface, Scene, Stats);
+}
+
+int32 UAcousticSceneExtractorComponent::AppendUETriangle(const FVector& P0, const FVector& P1, const FVector& P2, bool bMirrored, const FAcousticSurfaceSpec& Surface, FAcousticScene& Scene, FAcousticExtractionStats& Stats)
+{
 	const double Scale = 1.0 / Acoustics::CentimetersPerMeter;
 	const FVector3d A = FVector3d(P0) * Scale;
 	const FVector3d B = FVector3d(P1) * Scale;
 	const FVector3d C = FVector3d(P2) * Scale;
 	// UE front normal is (C - A) x (B - A); the core uses (V1 - V0) x (V2 - V0), hence the swap of B and C.
 	// A mirroring transform reverses the world-space winding once more, so it cancels the swap.
-	const FAcousticTriangle Triangle = bMirrored ? FAcousticTriangle(A, B, C, MaterialId) : FAcousticTriangle(A, C, B, MaterialId);
+	FAcousticTriangle Triangle = bMirrored ? FAcousticTriangle(A, B, C, Surface.MaterialId) : FAcousticTriangle(A, C, B, Surface.MaterialId);
+	Triangle.bInterface = Surface.bInterface;
+	Triangle.MediumFront = Surface.MediumFront;
+	Triangle.MediumBack = Surface.MediumBack;
 	if (Scene.AddTriangle(Triangle) == INDEX_NONE)
 	{
 		++Stats.NumDegenerateTriangles;
@@ -200,6 +224,13 @@ int32 UAcousticSceneExtractorComponent::AppendUETriangle(const FVector& P0, cons
 }
 
 int32 UAcousticSceneExtractorComponent::AppendStaticMesh(const UStaticMesh* Mesh, const FTransform& ToWorld, int32 MaterialId, FAcousticScene& Scene, FAcousticExtractionStats& Stats)
+{
+	FAcousticSurfaceSpec Surface;
+	Surface.MaterialId = MaterialId;
+	return AppendStaticMesh(Mesh, ToWorld, Surface, Scene, Stats);
+}
+
+int32 UAcousticSceneExtractorComponent::AppendStaticMesh(const UStaticMesh* Mesh, const FTransform& ToWorld, const FAcousticSurfaceSpec& Surface, FAcousticScene& Scene, FAcousticExtractionStats& Stats)
 {
 	if (!Mesh)
 	{
@@ -245,12 +276,19 @@ int32 UAcousticSceneExtractorComponent::AppendStaticMesh(const UStaticMesh* Mesh
 		const FVector P0 = ToWorld.TransformPosition(FVector(Positions.VertexPosition(I0)));
 		const FVector P1 = ToWorld.TransformPosition(FVector(Positions.VertexPosition(I1)));
 		const FVector P2 = ToWorld.TransformPosition(FVector(Positions.VertexPosition(I2)));
-		Added += AppendUETriangle(P0, P1, P2, bMirrored, MaterialId, Scene, Stats);
+		Added += AppendUETriangle(P0, P1, P2, bMirrored, Surface, Scene, Stats);
 	}
 	return Added;
 }
 
 int32 UAcousticSceneExtractorComponent::AppendDynamicMesh(const UDynamicMesh* Mesh, const FTransform& ToWorld, int32 MaterialId, FAcousticScene& Scene, FAcousticExtractionStats& Stats)
+{
+	FAcousticSurfaceSpec Surface;
+	Surface.MaterialId = MaterialId;
+	return AppendDynamicMesh(Mesh, ToWorld, Surface, Scene, Stats);
+}
+
+int32 UAcousticSceneExtractorComponent::AppendDynamicMesh(const UDynamicMesh* Mesh, const FTransform& ToWorld, const FAcousticSurfaceSpec& Surface, FAcousticScene& Scene, FAcousticExtractionStats& Stats)
 {
 	if (!Mesh)
 	{
@@ -268,10 +306,96 @@ int32 UAcousticSceneExtractorComponent::AppendDynamicMesh(const UDynamicMesh* Me
 			const FVector P0 = ToWorld.TransformPosition(DynamicMesh.GetVertex(Triangle.A));
 			const FVector P1 = ToWorld.TransformPosition(DynamicMesh.GetVertex(Triangle.B));
 			const FVector P2 = ToWorld.TransformPosition(DynamicMesh.GetVertex(Triangle.C));
-			Added += AppendUETriangle(P0, P1, P2, bMirrored, MaterialId, Scene, Stats);
+			Added += AppendUETriangle(P0, P1, P2, bMirrored, Surface, Scene, Stats);
 		}
 	});
 	return Added;
+}
+
+bool UAcousticSceneExtractorComponent::FindPrefixedTag(const TArray<FName>& Tags, const FString& Prefix, FName& OutName)
+{
+	if (Prefix.IsEmpty())
+	{
+		return false;
+	}
+	for (const FName& Tag : Tags)
+	{
+		const FString TagString = Tag.ToString();
+		if (TagString.StartsWith(Prefix, ESearchCase::IgnoreCase))
+		{
+			const FString Value = TagString.Mid(Prefix.Len()).TrimStartAndEnd();
+			if (!Value.IsEmpty())
+			{
+				OutName = FName(*Value);
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool UAcousticSceneExtractorComponent::FindMedium(FName Name, FMedium& OutMedium) const
+{
+	for (const FAcousticMediumSpec& Spec : MediaLibrary)
+	{
+		if (!Spec.Name.IsNone() && Spec.Name == Name)
+		{
+			OutMedium = FMedium(Spec.Name.ToString(), FMath::Max(1.0f, Spec.SpeedOfSound), FMath::Max(0.001f, Spec.Density));
+			return true;
+		}
+	}
+	return AcousticMediumPresets::Find(Name, OutMedium);
+}
+
+int32 UAcousticSceneExtractorComponent::ResolveMediumId(const UPrimitiveComponent* Component, FName Name, FAcousticScene& Scene, TMap<FName, int32>& MediumIds, FAcousticExtractionStats& Stats) const
+{
+	if (Name.IsNone())
+	{
+		return 0;
+	}
+	if (const int32* Existing = MediumIds.Find(Name))
+	{
+		return *Existing;
+	}
+	FMedium Medium;
+	if (!FindMedium(Name, Medium))
+	{
+		Stats.Warnings.Add(FString::Printf(TEXT("%s: medium \"%s\" is neither in the media library nor a preset, using \"%s\""), *DescribeComponent(Component), *Name.ToString(), *Scene.Media[0].Name));
+		MediumIds.Add(Name, 0);
+		return 0;
+	}
+	const int32 MediumId = Scene.FindOrAddMedium(Medium);
+	MediumIds.Add(Name, MediumId);
+	return MediumId;
+}
+
+FAcousticSurfaceSpec UAcousticSceneExtractorComponent::ResolveSurface(const UPrimitiveComponent* Component, const UStaticMesh* Mesh, FAcousticScene& Scene, TMap<FName, int32>& MaterialIds, TMap<FName, int32>& MediumIds, FAcousticExtractionStats& Stats) const
+{
+	FAcousticSurfaceSpec Surface;
+	Surface.MaterialId = ResolveMaterialId(Component, Mesh, Scene, MaterialIds, Stats);
+	const AActor* Owner = Component->GetOwner();
+	const bool bTagged = !InterfaceTag.IsNone() && (Component->ComponentHasTag(InterfaceTag) || (Owner && Owner->ActorHasTag(InterfaceTag)));
+	Surface.bInterface = bTagged || Scene.GetMaterial(Surface.MaterialId).bInterface;
+	if (!Surface.bInterface)
+	{
+		return Surface;
+	}
+	FName Front;
+	FName Back;
+	const bool bFront = FindPrefixedTag(Component->ComponentTags, MediumFrontTagPrefix, Front) || (Owner && FindPrefixedTag(Owner->Tags, MediumFrontTagPrefix, Front));
+	const bool bBack = FindPrefixedTag(Component->ComponentTags, MediumBackTagPrefix, Back) || (Owner && FindPrefixedTag(Owner->Tags, MediumBackTagPrefix, Back));
+	if (!bFront || !bBack)
+	{
+		Stats.Warnings.Add(FString::Printf(TEXT("%s: interface without %s tags, using front %s / back %s"), *DescribeComponent(Component),
+			!bFront && !bBack ? TEXT("medium") : (!bFront ? TEXT("front-medium") : TEXT("back-medium")), *DefaultInterfaceFrontMedium.ToString(), *DefaultInterfaceBackMedium.ToString()));
+	}
+	Surface.MediumFront = ResolveMediumId(Component, bFront ? Front : DefaultInterfaceFrontMedium, Scene, MediumIds, Stats);
+	Surface.MediumBack = ResolveMediumId(Component, bBack ? Back : DefaultInterfaceBackMedium, Scene, MediumIds, Stats);
+	if (Surface.MediumFront == Surface.MediumBack)
+	{
+		Stats.Warnings.Add(FString::Printf(TEXT("%s: interface with the same medium on both sides (%s), refraction has no effect there"), *DescribeComponent(Component), *Scene.GetMedium(Surface.MediumFront).Name));
+	}
+	return Surface;
 }
 
 bool UAcousticSceneExtractorComponent::FindMaterialTag(const TArray<FName>& Tags, FName& OutName) const

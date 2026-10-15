@@ -23,6 +23,7 @@
 #include "Scene/ReceiverGrid.h"
 #include "Simulation/AcousticSimulationManager.h"
 #include "Simulation/AcousticSimulationSubsystem.h"
+#include "Solvers/BeamTracer.h"
 #include "Styling/CoreStyle.h"
 #include "UI/HeatmapLegendWidget.h"
 #include "UI/IRPlotWidget.h"
@@ -195,6 +196,14 @@ void USimulationHUDWidget::NativeConstruct()
 			}
 		}
 		SolverCombo->OnSelectionChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleSolverChanged);
+	}
+	if (SourceCombo)
+	{
+		SourceCombo->OnSelectionChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleSourceChanged);
+	}
+	if (RefractionCheck)
+	{
+		RefractionCheck->OnCheckStateChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleRefractionChanged);
 	}
 	if (ImagesCheck)
 	{
@@ -614,6 +623,34 @@ void USimulationHUDWidget::BuildSettingsRows()
 		}
 	}
 
+	// Source selector (M6): levels with several sources (Level_Refraction: Pool, Lens).
+	{
+		UHorizontalBox* Line = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("SourceRow"));
+		UTextBlock* Label = MakeText(NAME_None, 11, LabelColor);
+		Label->SetText(LOCTEXT("Source", "Source"));
+		if (UHorizontalBoxSlot* LabelSlot = Line->AddChildToHorizontalBox(Label))
+		{
+			LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			LabelSlot->SetVerticalAlignment(VAlign_Center);
+			LabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+		}
+		SourceCombo = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("SourceCombo"));
+		SourceCombo->OnSelectionChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleSourceChanged);
+		USizeBox* ComboSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		ComboSize->SetWidthOverride(124.f);
+		ComboSize->SetContent(SourceCombo);
+		if (UHorizontalBoxSlot* ComboSlot = Line->AddChildToHorizontalBox(ComboSize))
+		{
+			ComboSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		if (UVerticalBoxSlot* LineSlot = SettingsBox->AddChildToVerticalBox(Line))
+		{
+			LineSlot->SetPadding(FMargin(0.f, 1.f, 0.f, 3.f));
+			LineSlot->SetHorizontalAlignment(HAlign_Fill);
+		}
+		RefreshSourceOptions();
+	}
+
 	struct FRowSpec
 	{
 		FName Id;
@@ -624,7 +661,7 @@ void USimulationHUDWidget::BuildSettingsRows()
 		{ FieldMaxOrder, LOCTEXT("MaxOrder", "Max order") },
 		{ FieldSeed, LOCTEXT("Seed", "Seed") },
 		{ FieldImageOrder, LOCTEXT("ImageOrder", "Image sources: order (<= 3)") },
-		{ FieldBeamSubdiv, LOCTEXT("BeamSubdiv", "Beams: subdivision (0=20, 2=320)") },
+		{ FieldBeamSubdiv, LOCTEXT("BeamSubdiv", "Beams: subdivision (0=20, 2=320, 6=81920)") },
 		{ FieldBeamOrder, LOCTEXT("BeamOrder", "Beams: max order") },
 		{ FieldReceiverRadius, LOCTEXT("ReceiverRadius", "Receiver r, m (0 = own)") },
 		{ FieldBinMs, LOCTEXT("BinMs", "Bin, ms") },
@@ -673,6 +710,101 @@ void USimulationHUDWidget::BuildSettingsRows()
 			LineSlot->SetPadding(FMargin(0.f, 1.f));
 			LineSlot->SetHorizontalAlignment(HAlign_Fill);
 		}
+	}
+
+	// Refraction (M6): the beam tracer splits beams at interface triangles; the apex of the refracted beam is an approximation.
+	{
+		UHorizontalBox* Line = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RefractionRow"));
+		UTextBlock* Label = MakeText(NAME_None, 11, LabelColor);
+		Label->SetText(LOCTEXT("Refraction", "Beams: refraction at interfaces"));
+		if (UHorizontalBoxSlot* LabelSlot = Line->AddChildToHorizontalBox(Label))
+		{
+			LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			LabelSlot->SetVerticalAlignment(VAlign_Center);
+			LabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+		}
+		RefractionCheck = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), TEXT("RefractionCheck"));
+		RefractionCheck->OnCheckStateChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleRefractionChanged);
+		if (UHorizontalBoxSlot* CheckSlot = Line->AddChildToHorizontalBox(RefractionCheck))
+		{
+			CheckSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		if (UVerticalBoxSlot* LineSlot = SettingsBox->AddChildToVerticalBox(Line))
+		{
+			LineSlot->SetPadding(FMargin(0.f, 1.f));
+			LineSlot->SetHorizontalAlignment(HAlign_Fill);
+		}
+		RefractionNoteText = MakeText(TEXT("RefractionNoteText"), 9, MutedColor);
+		RefractionNoteText->SetAutoWrapText(true);
+		RefractionNoteText->SetText(LOCTEXT("RefractionNote", "Refracted beam apex = least-squares fit of the 3 refracted guide rays (approximation: a refracted beam has no exact apex, Sikora 2012 sec. 3.1.2 / Sikora 2010). Energy split R / T by impedances at normal incidence; beyond the critical angle only the reflected beam."));
+		if (UVerticalBoxSlot* NoteSlot = SettingsBox->AddChildToVerticalBox(RefractionNoteText))
+		{
+			NoteSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+			NoteSlot->SetHorizontalAlignment(HAlign_Fill);
+		}
+	}
+}
+
+void USimulationHUDWidget::RefreshSourceOptions()
+{
+	if (!SourceCombo)
+	{
+		return;
+	}
+	const AAcousticSimulationManager* Current = Manager.Get();
+	const TArray<FName> Ids = Current ? Current->GetSourceIds() : TArray<FName>();
+	bool bSame = SourceCombo->GetOptionCount() == Ids.Num();
+	for (int32 Index = 0; bSame && Index < Ids.Num(); ++Index)
+	{
+		bSame = SourceCombo->GetOptionAtIndex(Index) == Ids[Index].ToString();
+	}
+	if (!bSame)
+	{
+		SourceCombo->ClearOptions();
+		for (const FName& Id : Ids)
+		{
+			SourceCombo->AddOption(Id.ToString());
+		}
+	}
+	SourceCombo->SetIsEnabled(Ids.Num() > 1);
+	if (Current)
+	{
+		int32 Selected = Current->SourceId.IsNone() ? 0 : Ids.IndexOfByKey(Current->SourceId);
+		if (Selected == INDEX_NONE)
+		{
+			Selected = 0;
+		}
+		if (Ids.IsValidIndex(Selected) && SourceCombo->GetSelectedIndex() != Selected)
+		{
+			SourceCombo->SetSelectedIndex(Selected);
+		}
+	}
+}
+
+void USimulationHUDWidget::HandleSourceChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
+{
+	AAcousticSimulationManager* Current = Manager.Get();
+	if (!Current || SelectedItem.IsEmpty())
+	{
+		return;
+	}
+	const FName Id(*SelectedItem);
+	if (Current->SourceId != Id)
+	{
+		Current->SourceId = Id;
+		UE_LOG(LogAcoustics, Log, TEXT("Source selected: %s"), *SelectedItem);
+	}
+}
+
+void USimulationHUDWidget::HandleRefractionChanged(bool bChecked)
+{
+	if (AAcousticSimulationManager* Current = Manager.Get())
+	{
+		Current->Settings.bRefraction = bChecked;
+	}
+	if (RefractionNoteText)
+	{
+		RefractionNoteText->SetVisibility(bChecked ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	}
 }
 
@@ -1055,7 +1187,7 @@ void USimulationHUDWidget::HandleFieldCommitted(FName FieldId, const FText& Text
 	}
 	else if (FieldId == FieldBeamSubdiv)
 	{
-		Settings.SubdivisionLevel = FMath::Clamp(IntValue, 0, 5);
+		Settings.SubdivisionLevel = FMath::Clamp(IntValue, 0, 7);
 	}
 	else if (FieldId == FieldBeamOrder)
 	{
@@ -1167,6 +1299,15 @@ void USimulationHUDWidget::LoadFieldsFromManager()
 	{
 		AirAbsorptionCheck->SetIsChecked(Settings.bAirAbsorption);
 	}
+	if (RefractionCheck)
+	{
+		RefractionCheck->SetIsChecked(Settings.bRefraction);
+	}
+	if (RefractionNoteText)
+	{
+		RefractionNoteText->SetVisibility(Settings.bRefraction ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
+	RefreshSourceOptions();
 	if (SolverCombo)
 	{
 		const int32 SolverIndex = SolverOptions().IndexOfByKey(Current->GetEffectiveSolver());
@@ -1339,6 +1480,17 @@ void USimulationHUDWidget::RefreshMetrics()
 			Text = FString::Printf(TEXT("%s: %d root beams, %d beam nodes, %d triangles, %d beams contain %s\n%.3f s total (tree %.3f s, receivers %.3f s)"),
 				*Result->SolverName, Result->NumRootBeams, Result->NumBeamNodes, Result->NumTriangles, Receiver.ContainingBeamNodes.Num(), *Receiver.Name,
 				Result->Timing.TotalSeconds, Result->Timing.SetupSeconds, Result->Timing.TraceSeconds);
+			if (Result->BeamTree.IsValid() && (Result->BeamTree->NumRefracted > 0 || Result->BeamTree->NumTotalInternalReflections > 0))
+			{
+				const FBeamTree& Tree = *Result->BeamTree;
+				int32 NumRefractedArrivals = 0;
+				for (const FEarlyReflection& Reflection : Receiver.EarlyReflections)
+				{
+					NumRefractedArrivals += Tree.Nodes.IsValidIndex(Reflection.BeamNode) && Tree.Nodes[Reflection.BeamNode].NumRefractions > 0 ? 1 : 0;
+				}
+				Text += FString::Printf(TEXT("\nRefraction: %d refracted beams, %d total internal reflections, %d continued beyond the focus, %d parallel apexes; %d refracted arrivals at %s (apex approximated by least squares)"),
+					Tree.NumRefracted, Tree.NumTotalInternalReflections, Tree.NumContinuations, Tree.NumParallelApexes, NumRefractedArrivals, *Receiver.Name);
+			}
 		}
 		else if (Result->NumImageSources > 0)
 		{

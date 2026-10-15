@@ -139,6 +139,17 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
 	TObjectPtr<UComboBoxString> SolverCombo;
 
+	/** Source selector (M6): the AAcousticSource ids of the level (Level_Refraction has Pool and Lens). */
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UComboBoxString> SourceCombo;
+
+	/** Beam tracer refraction (M6, FSolverSettings::bRefraction) and the note on the apex approximation. */
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UCheckBox> RefractionCheck;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> RefractionNoteText;
+
 	// Visualization block (M3).
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
 	TObjectPtr<UCheckBox> PathsCheck;
@@ -266,6 +277,12 @@ private:
 	void HandleSolverChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
 
 	UFUNCTION()
+	void HandleSourceChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	UFUNCTION()
+	void HandleRefractionChanged(bool bChecked);
+
+	UFUNCTION()
 	void HandleImagesChanged(bool bChecked);
 
 	UFUNCTION()
@@ -284,6 +301,7 @@ private:
 	UImageSourceVisualizerComponent* GetImageSourceVisualizer() const;
 	UBeamVisualizerComponent* GetBeamVisualizer() const;
 	static TArray<EAcousticSolver> SolverOptions();
+	void RefreshSourceOptions();
 	void HandleResultReady(AAcousticSimulationManager* InManager, const FSimulationResult& Result);
 	void SelectVariant(int32 Key);
 	UAuralizationComponent* GetAuralization() const;

@@ -31,6 +31,11 @@ struct ACOUSTICSCORE_API FAcousticScene
 	int32 FindMaterial(const FString& Name) const;
 	int32 FindOrAddMaterial(const FAcousticMaterialProps& Props);
 	int32 AddMedium(const FMedium& Medium);
+	int32 FindMedium(const FString& Name) const;
+	int32 FindOrAddMedium(const FMedium& Medium);
+
+	/** Interface triangles (bInterface with different media on the two sides) exist: refraction has something to act on. */
+	bool HasInterfaces() const;
 
 	/** Appends the triangle after recomputing its normal; returns INDEX_NONE for degenerate ones (not added). */
 	int32 AddTriangle(FAcousticTriangle Triangle);

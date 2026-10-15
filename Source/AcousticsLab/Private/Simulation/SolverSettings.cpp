@@ -57,6 +57,7 @@ FBeamTracerSettings FSolverSettings::ToBeamTracerSettings() const
 	Result.MaxBeamNodes = FMath::Max(1, MaxBeamNodes);
 	Result.bUseBVH = bUseBVH;
 	Result.NumThreads = FMath::Max(0, NumThreads);
+	Result.bRefraction = bRefraction;
 	return Result;
 }
 
@@ -69,7 +70,7 @@ FString FSolverSettings::ToString(EAcousticSolver Solver) const
 	case EAcousticSolver::ImageSource:
 		return FString::Printf(TEXT("image sources up to order %d (budget %d), %s"), ImageSourceOrder, MaxImageSources, *Common);
 	case EAcousticSolver::BeamTracer:
-		return FString::Printf(TEXT("beams: subdivision %d (%d root beams), order <= %d, node budget %d, %s"), SubdivisionLevel, 20 * (1 << (2 * FMath::Max(0, SubdivisionLevel))), MaxBeamOrder, MaxBeamNodes, *Common);
+		return FString::Printf(TEXT("beams: subdivision %d (%d root beams), order <= %d, node budget %d, refraction %s, %s"), SubdivisionLevel, 20 * (1 << (2 * FMath::Max(0, SubdivisionLevel))), MaxBeamOrder, MaxBeamNodes, bRefraction ? TEXT("on") : TEXT("off"), *Common);
 	default:
 		return FString::Printf(TEXT("%d rays, max order %d, seed %d, %s, threads %d, paths %d"), NumRays, MaxOrder, Seed, *Common, NumThreads, MaxPathsForVisualization);
 	}

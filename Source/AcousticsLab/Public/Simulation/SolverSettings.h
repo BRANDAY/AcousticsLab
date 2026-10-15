@@ -69,8 +69,8 @@ struct ACOUSTICSLAB_API FSolverSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visualization", meta = (ClampMin = "0", ClampMax = "100000"))
 	int32 MaxPathsForVisualization = 2000;
 
-	/** Icosahedron subdivisions of the beam emission (M5): 0 = 20 beams, 2 = 320, 3 = 1280. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Beams", meta = (ClampMin = "0", ClampMax = "5"))
+	/** Icosahedron subdivisions of the beam emission (M5): 0 = 20 beams, 2 = 320, 3 = 1280, 6 = 81920 (dense beams for the lens with a directional source). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Beams", meta = (ClampMin = "0", ClampMax = "7"))
 	int32 SubdivisionLevel = 2;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Beams", meta = (ClampMin = "0", ClampMax = "10"))
@@ -92,6 +92,10 @@ struct ACOUSTICSLAB_API FSolverSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hybrid", meta = (ClampMin = "0", ClampMax = "10"))
 	int32 HybridK = 2;
 
+	/**
+	 * Beam tracer (M6, SPEC §2.6): beams split at interface triangles into a reflected and a refracted beam. The refracted
+	 * apex is the least-squares intersection of the three refracted guide rays - an approximation (Sikora 2012 §3.1.2).
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Refraction")
 	bool bRefraction = false;
 

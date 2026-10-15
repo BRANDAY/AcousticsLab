@@ -1,6 +1,7 @@
 #include "Scene/AcousticSource.h"
 
 #include "AcousticsConstants.h"
+#include "Components/ArrowComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "EngineUtils.h"
@@ -9,6 +10,7 @@
 
 AAcousticSource::AAcousticSource()
 	: SourceId(TEXT("S1"))
+	, MediumName(TEXT("Air"))
 {
 	PrimaryActorTick.bCanEverTick = false;
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
@@ -28,6 +30,26 @@ AAcousticSource::AAcousticSource()
 	{
 		Marker->SetMaterial(0, MarkerMaterial.Object);
 	}
+	DirectionArrow = CreateDefaultSubobject<UArrowComponent>(TEXT("DirectionArrow"));
+	DirectionArrow->SetupAttachment(RootComponent);
+	DirectionArrow->ArrowColor = FColor(255, 160, 30);
+	DirectionArrow->ArrowSize = 2.0f;
+	DirectionArrow->bIsEditorOnly = true;
+	DirectionArrow->SetVisibility(false);
+}
+
+void AAcousticSource::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	if (DirectionArrow)
+	{
+		DirectionArrow->SetVisibility(bDirectional);
+	}
+}
+
+FVector3d AAcousticSource::GetDirection() const
+{
+	return FVector3d(GetActorForwardVector()).GetSafeNormal();
 }
 
 FVector3d AAcousticSource::GetPositionMeters() const

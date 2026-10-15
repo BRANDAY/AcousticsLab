@@ -43,6 +43,36 @@ int32 FAcousticScene::AddMedium(const FMedium& Medium)
 	return Media.Add(Medium);
 }
 
+int32 FAcousticScene::FindMedium(const FString& Name) const
+{
+	for (int32 Index = 0; Index < Media.Num(); ++Index)
+	{
+		if (Media[Index].Name.Equals(Name, ESearchCase::IgnoreCase))
+		{
+			return Index;
+		}
+	}
+	return INDEX_NONE;
+}
+
+int32 FAcousticScene::FindOrAddMedium(const FMedium& Medium)
+{
+	const int32 Existing = FindMedium(Medium.Name);
+	return Existing != INDEX_NONE ? Existing : AddMedium(Medium);
+}
+
+bool FAcousticScene::HasInterfaces() const
+{
+	for (const FAcousticTriangle& Triangle : Triangles)
+	{
+		if (Triangle.bInterface && Triangle.MediumFront != Triangle.MediumBack)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 int32 FAcousticScene::AddTriangle(FAcousticTriangle Triangle)
 {
 	if (!Triangle.ComputeNormal() || Triangle.IsDegenerate(MinTriangleArea))
@@ -140,10 +170,19 @@ const FMedium& FAcousticScene::GetMedium(int32 MediumId) const
 FString FAcousticScene::DescribeStats() const
 {
 	const FBox3d Bounds = ComputeBounds();
-	FString Result = FString::Printf(TEXT("Scene: %d triangles, %.3f m^2, %d materials, %d media, bounds (%.2f %.2f %.2f)-(%.2f %.2f %.2f) m; %s"),
-		Triangles.Num(), TotalArea(), Materials.Num(), Media.Num(),
+	int32 NumInterfaces = 0;
+	for (const FAcousticTriangle& Triangle : Triangles)
+	{
+		NumInterfaces += Triangle.bInterface ? 1 : 0;
+	}
+	FString Result = FString::Printf(TEXT("Scene: %d triangles (%d interface), %.3f m^2, %d materials, %d media, bounds (%.2f %.2f %.2f)-(%.2f %.2f %.2f) m; %s"),
+		Triangles.Num(), NumInterfaces, TotalArea(), Materials.Num(), Media.Num(),
 		Bounds.Min.X, Bounds.Min.Y, Bounds.Min.Z, Bounds.Max.X, Bounds.Max.Y, Bounds.Max.Z,
 		HasBVH() ? *Bvh.DescribeStats() : TEXT("no BVH"));
+	for (int32 Index = 0; Index < Media.Num(); ++Index)
+	{
+		Result += FString::Printf(TEXT("\n  medium %d \"%s\": c %.0f m/s, rho %.0f kg/m^3, Z %.3g"), Index, *Media[Index].Name, Media[Index].SpeedOfSound, Media[Index].Density, Media[Index].Impedance());
+	}
 	for (int32 Index = 0; Index < Materials.Num(); ++Index)
 	{
 		int32 Count = 0;
