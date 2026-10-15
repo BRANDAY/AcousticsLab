@@ -18,6 +18,7 @@
 #include "Framework/AcousticsPlayerController.h"
 #include "Results/RoomMetrics.h"
 #include "Simulation/AcousticSimulationManager.h"
+#include "Simulation/AcousticSimulationSubsystem.h"
 #include "Solvers/BeamTracer.h"
 #include "Solvers/HybridTracer.h"
 #include "Styling/CoreStyle.h"
@@ -532,9 +533,17 @@ FString UCompareWidget::BuildMetricsTable() const
 	Columns.Add({ TEXT("Pure ray"), &Ray.Receivers[Index], Hybrid->RaySeconds, RayCount, TEXT("-"), FString() });
 	Columns.Add({ FString::Printf(TEXT("Beam<=%d"), Hybrid->K), &Beam.Receivers[Index], Hybrid->BeamSeconds, TEXT("-"), BeamCount, FString() });
 	Columns.Add({ TEXT("Hybrid"), &Mixed.Receivers[Index], Mixed.Timing.TotalSeconds, RayCount, BeamCount, FString() });
-	// M9 (SPEC 3.8): metrics from the recorded click response of the industry plugins.
-	Columns.Add({ TEXT("SteamAud"), nullptr, 0.0, FString(), FString(), TEXT("M9") });
-	Columns.Add({ TEXT("AudioTr"), nullptr, 0.0, FString(), FString(), TEXT("M9") });
+	// M9 (SPEC 3.8): metrics from the recorded click response of the industry plugins (Acoustics.Industry.MeasureClick in
+	// Level_Amphitheatre_SteamAudio / _AudioTracing), matched by receiver id; "click" = not measured yet.
+	TArray<TSharedPtr<const FReceiverResult>> IndustryResults;
+	const UAcousticSimulationSubsystem* Subsystem = UAcousticSimulationSubsystem::Get(this);
+	const TPair<const TCHAR*, const TCHAR*> IndustryColumns[] = { { TEXT("SteamAud"), TEXT("Steam Audio") }, { TEXT("AudioTr"), TEXT("Audio Tracing") } };
+	for (const TPair<const TCHAR*, const TCHAR*>& Industry : IndustryColumns)
+	{
+		TSharedPtr<const FReceiverResult> Measured = Subsystem ? Subsystem->FindIndustryResult(Industry.Value, FName(*Mixed.Receivers[Index].Name)) : nullptr;
+		IndustryResults.Add(Measured);
+		Columns.Add({ Industry.Key, Measured.Get(), 0.0, TEXT("-"), TEXT("-"), Measured ? FString() : FString(TEXT("click")) });
+	}
 
 	constexpr int32 LabelWidth = 8;
 	constexpr int32 CellWidth = 11;

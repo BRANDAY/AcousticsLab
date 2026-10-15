@@ -34,3 +34,6 @@ docs/ENV.local.md
 
 # Python cache from editor scripts
 __pycache__/
+
+# Third-party plugins installed by script / launcher (M9): Steam Audio via Tools/Plugins/install_steam_audio.ps1
+Plugins/SteamAudio/

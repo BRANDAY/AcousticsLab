@@ -4,6 +4,7 @@
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Framework/AcousticsPlayerController.h"
+#include "Industry/IndustryAudioActor.h"
 #include "Kismet/GameplayStatics.h"
 #include "Levels/LevelSetupActor.h"
 
@@ -36,4 +37,11 @@ void AAcousticsHUD::DrawHUD()
 
 	DrawText(Line1, FLinearColor::White, 24.f, 24.f, GEngine->GetMediumFont());
 	DrawText(Line2, FLinearColor(0.75f, 0.75f, 0.75f), 24.f, 48.f, GEngine->GetSmallFont());
+	// Industry levels (M9): the plugin key and its state (spatializer, ray tracing, listener receiver).
+	if (const AIndustryAudioActor* Industry = AIndustryAudioActor::Find(GetWorld()))
+	{
+		const FString Line3 = FString::Printf(TEXT("%d: %s (plugin source, listener at a receiver: console Acoustics.Industry.Receiver R1..R4)   |   %s"),
+			Industry->VariantKey, *Industry->GetPluginDisplayName(), *Industry->DescribeState());
+		DrawText(Line3, FLinearColor(1.0f, 0.85f, 0.4f), 24.f, 66.f, GEngine->GetSmallFont());
+	}
 }

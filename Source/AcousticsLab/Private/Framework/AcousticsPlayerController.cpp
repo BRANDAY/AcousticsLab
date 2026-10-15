@@ -17,6 +17,7 @@
 #include "UI/MainMenuWidget.h"
 #include "UI/BenchmarkWidget.h"
 #include "UI/CompareWidget.h"
+#include "Industry/IndustryAudioActor.h"
 #include "UI/SimulationHUDWidget.h"
 
 AAcousticsPlayerController::AAcousticsPlayerController()
@@ -382,6 +383,21 @@ void AAcousticsPlayerController::OnSelectVariant(const FInputActionValue& Value,
 	SelectedVariant = Variant;
 	const AAcousticSimulationManager* Manager = bIsMainMenu ? nullptr : AAcousticSimulationManager::Find(GetWorld());
 	UAuralizationComponent* Auralization = Manager ? Manager->Auralization.Get() : nullptr;
+	// Industry levels (M9): key 5 / 6 belongs to the level's plugin; the industry actor stops its source for keys 1-4.
+	if (AIndustryAudioActor* Industry = bIsMainMenu ? nullptr : AIndustryAudioActor::Find(GetWorld()))
+	{
+		if (Industry->HandleVariantKey(Variant, Auralization))
+		{
+			UE_LOG(LogAcoustics, Log, TEXT("A/B variant %d (%s) selected"), Variant, *UAuralizationComponent::VariantName(UAuralizationComponent::VariantFromKey(Variant)));
+			return;
+		}
+	}
+	else if (Variant == 5 || Variant == 6)
+	{
+		UE_LOG(LogAcoustics, Log, TEXT("A/B variant %d (%s): only in Level_Amphitheatre_%s"), Variant, *UAuralizationComponent::VariantName(UAuralizationComponent::VariantFromKey(Variant)),
+			Variant == 5 ? TEXT("SteamAudio") : TEXT("AudioTracing"));
+		return;
+	}
 	const bool bRouted = Auralization && Auralization->SetVariantByKey(Variant);
 	UE_LOG(LogAcoustics, Log, TEXT("A/B variant %d (%s) selected%s"), Variant, *UAuralizationComponent::VariantName(UAuralizationComponent::VariantFromKey(Variant)),
 		bRouted ? TEXT("") : (Auralization ? TEXT(": no result or signal path for it yet") : TEXT(": no simulation manager in this level")));

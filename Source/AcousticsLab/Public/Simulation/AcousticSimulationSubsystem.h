@@ -7,6 +7,7 @@
 #include "AcousticSimulationSubsystem.generated.h"
 
 struct FHybridResult;
+struct FReceiverResult;
 struct FSimulationResult;
 
 /** Results per (level, solver) and the last settings used, alive for the whole game instance. */
@@ -30,12 +31,17 @@ public:
 	TSharedPtr<const FHybridResult> FindHybridResult(const FString& LevelName) const;
 	int32 NumResults() const { return Results.Num(); }
 
+	/** Click responses of the industry plugins (M9, SPEC §3.8) per plugin ("Steam Audio", "Audio Tracing") and receiver id (R1..R4). */
+	void StoreIndustryResult(const FString& PluginName, FName ReceiverId, const TSharedPtr<const FReceiverResult>& Result);
+	TSharedPtr<const FReceiverResult> FindIndustryResult(const FString& PluginName, FName ReceiverId) const;
+
 	void RememberSettings(const FSolverSettings& Settings);
 	bool GetLastSettings(FSolverSettings& OutSettings) const;
 
 private:
 	TMap<FString, TSharedPtr<const FSimulationResult>> Results;
 	TMap<FString, TSharedPtr<const FHybridResult>> HybridResults;
+	TMap<FString, TSharedPtr<const FReceiverResult>> IndustryResults;
 
 	UPROPERTY(Transient)
 	FSolverSettings LastSettings;

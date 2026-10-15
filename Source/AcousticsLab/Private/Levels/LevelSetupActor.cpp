@@ -2,6 +2,7 @@
 
 #include "Components/SceneComponent.h"
 #include "EngineUtils.h"
+#include "Levels/AmphitheatrePositionsAsset.h"
 #include "Scene/AcousticSceneExtractorComponent.h"
 
 ALevelSetupActor::ALevelSetupActor()
@@ -16,6 +17,25 @@ void ALevelSetupActor::LogExtractedScene()
 	if (SceneExtractor)
 	{
 		SceneExtractor->LogExtractedScene();
+	}
+}
+
+void ALevelSetupActor::ApplyPositions()
+{
+	if (Positions)
+	{
+		Modify();
+		Positions->ApplyToWorld(GetWorld());
+	}
+}
+
+void ALevelSetupActor::BeginPlay()
+{
+	Super::BeginPlay();
+	// The asset is the single source of truth for every amphitheatre level; a level saved with older positions follows it.
+	if (Positions)
+	{
+		Positions->ApplyToWorld(GetWorld());
 	}
 }
 

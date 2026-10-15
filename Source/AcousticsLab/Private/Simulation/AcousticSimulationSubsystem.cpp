@@ -78,3 +78,14 @@ bool UAcousticSimulationSubsystem::GetLastSettings(FSolverSettings& OutSettings)
 	OutSettings = LastSettings;
 	return true;
 }
+
+void UAcousticSimulationSubsystem::StoreIndustryResult(const FString& PluginName, FName ReceiverId, const TSharedPtr<const FReceiverResult>& Result)
+{
+	IndustryResults.Add(PluginName + TEXT("|") + ReceiverId.ToString(), Result);
+}
+
+TSharedPtr<const FReceiverResult> UAcousticSimulationSubsystem::FindIndustryResult(const FString& PluginName, FName ReceiverId) const
+{
+	const TSharedPtr<const FReceiverResult>* Found = IndustryResults.Find(PluginName + TEXT("|") + ReceiverId.ToString());
+	return Found ? *Found : nullptr;
+}

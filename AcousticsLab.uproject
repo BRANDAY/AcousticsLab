@@ -64,6 +64,11 @@
 			"Enabled": true
 		},
 		{
+			"Name": "SteamAudio",
+			"Enabled": true,
+			"Optional": true
+		},
+		{
 			"Name": "AllToolsets",
 			"Enabled": true,
 			"TargetAllowList": [
