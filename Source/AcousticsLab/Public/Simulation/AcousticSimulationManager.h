@@ -11,6 +11,7 @@
 
 struct FAcousticScene;
 class AReceiverGrid;
+class UAuralizationComponent;
 class URayPathVisualizerComponent;
 
 /** What a receiver of the result corresponds to in the level. */
@@ -95,6 +96,10 @@ public:
 	/** Draws the sampled ray paths of the last result (M3). */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Acoustics")
 	TObjectPtr<URayPathVisualizerComponent> PathVisualizer;
+
+	/** Impulse responses, WAV export and convolution reverb of the last result (M4). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Acoustics")
+	TObjectPtr<UAuralizationComponent> Auralization;
 
 	/** One entry per receiver of the last result: point receiver actor or grid tile. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Acoustics|State")

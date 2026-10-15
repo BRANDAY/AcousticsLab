@@ -1,6 +1,7 @@
 #include "Simulation/AcousticSimulationManager.h"
 
 #include "AcousticsCore.h"
+#include "Audio/AuralizationComponent.h"
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -23,6 +24,7 @@ AAcousticSimulationManager::AAcousticSimulationManager()
 	PrimaryActorTick.bStartWithTickEnabled = true;
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	PathVisualizer = CreateDefaultSubobject<URayPathVisualizerComponent>(TEXT("PathVisualizer"));
+	Auralization = CreateDefaultSubobject<UAuralizationComponent>(TEXT("Auralization"));
 }
 
 void AAcousticSimulationManager::BeginPlay()
@@ -416,6 +418,10 @@ void AAcousticSimulationManager::FinishRun()
 		SetState(ESimulationState::Failed, LastResult->Error);
 	}
 	UpdateVisualizers();
+	if (Auralization)
+	{
+		Auralization->SetResult(LastResult->bSuccess ? LastResult : nullptr, GetPointReceiverIndices(), UGameplayStatics::GetCurrentLevelName(this, true), LastResult->SolverName);
+	}
 	OnResultReady.Broadcast(this, *LastResult);
 }
 

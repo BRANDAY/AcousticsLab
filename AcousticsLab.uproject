@@ -45,6 +45,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "Synthesis",
+			"Enabled": true
+		},
+		{
 			"Name": "PythonScriptPlugin",
 			"Enabled": true,
 			"TargetAllowList": [

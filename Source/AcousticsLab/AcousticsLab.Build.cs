@@ -21,10 +21,12 @@ public class AcousticsLab : ModuleRules
 		});
 
 		// GeometryCore / GeometryFramework: UDynamicMeshComponent and FDynamicMesh3 read by the scene extractor.
+		// Synthesis: UAudioImpulseResponse and USubmixEffectConvolutionReverbPreset used by the auralization component (M4).
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"GeometryCore",
-			"GeometryFramework"
+			"GeometryFramework",
+			"Synthesis"
 		});
 	}
 }

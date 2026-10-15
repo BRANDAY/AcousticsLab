@@ -1,6 +1,7 @@
 #include "UI/SimulationHUDWidget.h"
 
 #include "AcousticsCore.h"
+#include "Audio/AuralizationComponent.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
@@ -16,6 +17,7 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Framework/AcousticsPlayerController.h"
 #include "Results/SimulationResult.h"
 #include "Scene/ReceiverGrid.h"
 #include "Simulation/AcousticSimulationManager.h"
@@ -45,6 +47,8 @@ namespace
 	const FLinearColor ValueColor(0.95f, 0.95f, 0.95f);
 	const FLinearColor AccentColor(0.95f, 0.8f, 0.35f);
 	const FLinearColor MutedColor(0.55f, 0.55f, 0.6f);
+	const FLinearColor ButtonColor(0.14f, 0.17f, 0.22f);
+	const FLinearColor SelectedButtonColor(0.42f, 0.35f, 0.12f);
 
 	FString DecayText(double Value, bool bValid)
 	{
@@ -153,6 +157,22 @@ void USimulationHUDWidget::NativeConstruct()
 	if (ClearCurvesButton)
 	{
 		ClearCurvesButton->OnClicked.AddUniqueDynamic(this, &USimulationHUDWidget::HandleClearCurvesClicked);
+	}
+	if (PlayClipButton)
+	{
+		PlayClipButton->OnClicked.AddUniqueDynamic(this, &USimulationHUDWidget::HandlePlayClipClicked);
+	}
+	if (StopClipButton)
+	{
+		StopClipButton->OnClicked.AddUniqueDynamic(this, &USimulationHUDWidget::HandleStopClipClicked);
+	}
+	if (DryButton)
+	{
+		DryButton->OnClicked.AddUniqueDynamic(this, &USimulationHUDWidget::HandleDryClicked);
+	}
+	if (RayButton)
+	{
+		RayButton->OnClicked.AddUniqueDynamic(this, &USimulationHUDWidget::HandleRayClicked);
 	}
 	if (SettingsBox && Fields.IsEmpty())
 	{
@@ -307,9 +327,10 @@ void USimulationHUDWidget::BuildDefaultTree()
 	AddRow(ReferenceText, 0.f, 6.f);
 
 	BuildVisualizationBlock(Column);
+	BuildAuralizationBlock(Column);
 
 	HintText = MakeText(TEXT("HintText"), 10, MutedColor);
-	HintText->SetText(LOCTEXT("Hint", "Tab: cursor / fly   Enter in a field applies it   Esc: main menu"));
+	HintText->SetText(LOCTEXT("Hint", "Tab: cursor / fly   Enter in a field applies it   1 / 2: Dry / Ray   Esc: main menu"));
 	AddRow(HintText, 0.f, 0.f);
 
 	// Impulse-response panel, bottom-left.
@@ -432,6 +453,41 @@ void USimulationHUDWidget::BuildVisualizationBlock(UVerticalBox* Column)
 
 	VisualizationText = MakeText(TEXT("VisualizationText"), 10, MutedColor);
 	AddRow(VisualizationText, 0.f, 6.f);
+}
+
+void USimulationHUDWidget::BuildAuralizationBlock(UVerticalBox* Column)
+{
+	auto AddRow = [Column](UWidget* Widget, float Top, float Bottom)
+	{
+		if (UVerticalBoxSlot* RowSlot = Column->AddChildToVerticalBox(Widget))
+		{
+			RowSlot->SetPadding(FMargin(0.f, Top, 0.f, Bottom));
+			RowSlot->SetHorizontalAlignment(HAlign_Fill);
+		}
+	};
+
+	UTextBlock* Title = MakeText(TEXT("AuralizationTitle"), 12, AccentColor, true);
+	Title->SetText(LOCTEXT("AuralizationTitle", "Auralization (convolution reverb)"));
+	AddRow(Title, 2.f, 2.f);
+
+	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("AuralizationRow"));
+	DryButton = MakeButton(TEXT("DryButton"), LOCTEXT("DryVariant", "1: Dry"), ButtonColor);
+	RayButton = MakeButton(TEXT("RayButton"), LOCTEXT("RayVariant", "2: Ray"), ButtonColor);
+	PlayClipButton = MakeButton(TEXT("PlayClipButton"), LOCTEXT("PlayClip", "Play"), FLinearColor(0.15f, 0.4f, 0.2f));
+	StopClipButton = MakeButton(TEXT("StopClipButton"), LOCTEXT("StopClip", "Stop"), FLinearColor(0.4f, 0.15f, 0.15f));
+	for (UButton* Button : { DryButton.Get(), RayButton.Get(), PlayClipButton.Get(), StopClipButton.Get() })
+	{
+		if (UHorizontalBoxSlot* ButtonSlot = Row->AddChildToHorizontalBox(Button))
+		{
+			ButtonSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
+			ButtonSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		}
+	}
+	AddRow(Row, 0.f, 3.f);
+
+	AuralizationText = MakeText(TEXT("AuralizationText"), 10, MutedColor);
+	AuralizationText->SetText(LOCTEXT("NoAuralization", "IR: none yet (Run the simulation)"));
+	AddRow(AuralizationText, 0.f, 6.f);
 }
 
 void USimulationHUDWidget::BuildSettingsRows()
@@ -611,6 +667,82 @@ void USimulationHUDWidget::HandleClearCurvesClicked()
 	ClearPinnedCurves();
 }
 
+UAuralizationComponent* USimulationHUDWidget::GetAuralization() const
+{
+	const AAcousticSimulationManager* Current = Manager.Get();
+	return Current ? Current->Auralization.Get() : nullptr;
+}
+
+void USimulationHUDWidget::HandlePlayClipClicked()
+{
+	if (UAuralizationComponent* Auralization = GetAuralization())
+	{
+		Auralization->Play();
+	}
+	RefreshAuralization();
+}
+
+void USimulationHUDWidget::HandleStopClipClicked()
+{
+	if (UAuralizationComponent* Auralization = GetAuralization())
+	{
+		Auralization->Stop();
+	}
+	RefreshAuralization();
+}
+
+void USimulationHUDWidget::HandleDryClicked()
+{
+	SelectVariant(1);
+}
+
+void USimulationHUDWidget::HandleRayClicked()
+{
+	SelectVariant(2);
+}
+
+void USimulationHUDWidget::SelectVariant(int32 Key)
+{
+	if (AAcousticsPlayerController* Controller = GetOwningPlayer<AAcousticsPlayerController>())
+	{
+		Controller->SelectedVariant = Key;
+	}
+	if (UAuralizationComponent* Auralization = GetAuralization())
+	{
+		if (Auralization->SetVariantByKey(Key) && !Auralization->IsPlaying() && Auralization->HasImpulseResponse())
+		{
+			Auralization->Play();
+		}
+	}
+	RefreshAuralization();
+}
+
+void USimulationHUDWidget::RefreshAuralization()
+{
+	const UAuralizationComponent* Auralization = GetAuralization();
+	if (AuralizationText)
+	{
+		AuralizationText->SetText(FText::FromString(Auralization ? Auralization->DescribeState() : FString(TEXT("No auralization component in this level"))));
+	}
+	const bool bPlaying = Auralization && Auralization->IsPlaying();
+	if (PlayClipButton)
+	{
+		PlayClipButton->SetIsEnabled(Auralization != nullptr && !bPlaying);
+	}
+	if (StopClipButton)
+	{
+		StopClipButton->SetIsEnabled(bPlaying);
+	}
+	if (DryButton)
+	{
+		DryButton->SetBackgroundColor(Auralization && Auralization->Variant == EAuralizationVariant::Dry ? SelectedButtonColor : ButtonColor);
+	}
+	if (RayButton)
+	{
+		RayButton->SetBackgroundColor(Auralization && Auralization->Variant == EAuralizationVariant::Ray ? SelectedButtonColor : ButtonColor);
+	}
+}
+
 void USimulationHUDWidget::PinCurrentCurve()
 {
 	const AAcousticSimulationManager* Current = Manager.Get();
@@ -713,10 +845,15 @@ void USimulationHUDWidget::HandleResultReady(AAcousticSimulationManager* InManag
 	{
 		InManager->PathVisualizer->SetReceiverFilter(SelectedReceiver);
 	}
+	if (InManager && InManager->Auralization)
+	{
+		InManager->Auralization->SelectReceiver(SelectedReceiver);
+	}
 	RefreshMetrics();
 	RefreshReference();
 	RefreshPlot();
 	RefreshVisualization();
+	RefreshAuralization();
 	RefreshStatus();
 }
 
@@ -730,10 +867,15 @@ void USimulationHUDWidget::SelectReceiver(int32 Index)
 	{
 		Current->PathVisualizer->SetReceiverFilter(SelectedReceiver);
 	}
+	if (UAuralizationComponent* Auralization = GetAuralization())
+	{
+		Auralization->SelectReceiver(SelectedReceiver); // swaps the cached impulse response, no solver run
+	}
 	RefreshMetrics();
 	RefreshReference();
 	RefreshPlot();
 	RefreshVisualization();
+	RefreshAuralization();
 }
 
 void USimulationHUDWidget::RefreshAll()
@@ -744,6 +886,7 @@ void USimulationHUDWidget::RefreshAll()
 	RefreshReference();
 	RefreshPlot();
 	RefreshVisualization();
+	RefreshAuralization();
 }
 
 void USimulationHUDWidget::LoadFieldsFromManager()
@@ -854,6 +997,7 @@ void USimulationHUDWidget::RefreshStatus()
 		RefreshPlot();
 		RefreshVisualization();
 	}
+	RefreshAuralization(); // playback state and variant change outside the panel (keys 1 / 2)
 }
 
 void USimulationHUDWidget::RefreshMetrics()

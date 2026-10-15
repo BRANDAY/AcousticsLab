@@ -1,6 +1,7 @@
 #include "Framework/AcousticsPlayerController.h"
 
 #include "AcousticsCore.h"
+#include "Audio/AuralizationComponent.h"
 #include "Blueprint/UserWidget.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -258,5 +259,13 @@ void AAcousticsPlayerController::OnMenu(const FInputActionValue& Value)
 void AAcousticsPlayerController::OnSelectVariant(const FInputActionValue& Value, int32 Variant)
 {
 	SelectedVariant = Variant;
-	UE_LOG(LogAcoustics, Log, TEXT("A/B variant %d selected (auralization arrives in M4)"), Variant);
+	const AAcousticSimulationManager* Manager = bIsMainMenu ? nullptr : AAcousticSimulationManager::Find(GetWorld());
+	UAuralizationComponent* Auralization = Manager ? Manager->Auralization.Get() : nullptr;
+	const bool bRouted = Auralization && Auralization->SetVariantByKey(Variant);
+	UE_LOG(LogAcoustics, Log, TEXT("A/B variant %d (%s) selected%s"), Variant, *UAuralizationComponent::VariantName(UAuralizationComponent::VariantFromKey(Variant)),
+		bRouted ? TEXT("") : (Auralization ? TEXT(": no signal path for it yet") : TEXT(": no simulation manager in this level")));
+	if (bRouted && !Auralization->IsPlaying() && Auralization->HasImpulseResponse())
+	{
+		Auralization->Play();
+	}
 }

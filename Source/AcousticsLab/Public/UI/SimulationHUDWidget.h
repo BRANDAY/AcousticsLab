@@ -10,6 +10,7 @@
 
 class AAcousticSimulationManager;
 class AReceiverGrid;
+class UAuralizationComponent;
 class UButton;
 class UCheckBox;
 class UComboBoxString;
@@ -158,10 +159,27 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
 	TObjectPtr<UButton> ClearCurvesButton;
 
+	// Auralization block (M4).
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> AuralizationText;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UButton> PlayClipButton;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UButton> StopClipButton;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UButton> DryButton;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UButton> RayButton;
+
 private:
 	void BuildDefaultTree();
 	void BuildSettingsRows();
 	void BuildVisualizationBlock(UVerticalBox* Column);
+	void BuildAuralizationBlock(UVerticalBox* Column);
 	UTextBlock* MakeText(FName Name, int32 FontSize, const FLinearColor& Color, bool bBold = false);
 	UButton* MakeButton(FName Name, const FText& Label, const FLinearColor& Color);
 	USimulationSettingField* MakeField(FName Id, float Width);
@@ -199,14 +217,29 @@ private:
 	UFUNCTION()
 	void HandleClearCurvesClicked();
 
+	UFUNCTION()
+	void HandlePlayClipClicked();
+
+	UFUNCTION()
+	void HandleStopClipClicked();
+
+	UFUNCTION()
+	void HandleDryClicked();
+
+	UFUNCTION()
+	void HandleRayClicked();
+
 	void HandleFieldCommitted(FName FieldId, const FText& Text);
 	void HandleResultReady(AAcousticSimulationManager* InManager, const FSimulationResult& Result);
+	void SelectVariant(int32 Key);
+	UAuralizationComponent* GetAuralization() const;
 
 	void LoadFieldsFromManager();
 	void RefreshStatus();
 	void RefreshMetrics();
 	void RefreshReference();
 	void RefreshPlot();
+	void RefreshAuralization();
 	void RefreshVisualization();
 	TArray<AReceiverGrid*> FindGrids() const;
 

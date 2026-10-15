@@ -30,6 +30,11 @@ namespace Acoustics
 	/** Visualization keeps at most this many ray paths (SPEC §3.5). */
 	constexpr int32 DefaultMaxPathsForVisualization = 2000;
 
+	/** Impulse-response synthesis (SPEC §2.9): 48 kHz mono, peak -3 dBFS, cut where the Schroeder level drops below -60 dB. */
+	constexpr int32 DefaultIRSampleRate = 48000;
+	constexpr double DefaultIRPeakDbFS = -3.0;
+	constexpr double DefaultIRTruncateBelowDb = -60.0;
+
 	/** UE works in centimeters, the core in meters; conversion happens only at the module boundary. */
 	constexpr double CentimetersPerMeter = 100.0;
 }
