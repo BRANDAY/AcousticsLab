@@ -10,6 +10,35 @@
 #include "AcousticSimulationManager.generated.h"
 
 struct FAcousticScene;
+class AReceiverGrid;
+class URayPathVisualizerComponent;
+
+/** What a receiver of the result corresponds to in the level. */
+UENUM(BlueprintType)
+enum class EReceiverBindingKind : uint8
+{
+	/** An AAcousticReceiver actor (shown in the HUD selector). */
+	Point,
+	/** One tile of an AReceiverGrid (feeds its heatmap). */
+	GridTile
+};
+
+/** Receivers[i] of the last result <-> ReceiverBindings[i]. */
+USTRUCT(BlueprintType)
+struct FReceiverBinding
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, Category = "Acoustics")
+	EReceiverBindingKind Kind = EReceiverBindingKind::Point;
+
+	UPROPERTY(VisibleAnywhere, Category = "Acoustics")
+	TWeakObjectPtr<AActor> Actor;
+
+	/** Tile index for GridTile bindings. */
+	UPROPERTY(VisibleAnywhere, Category = "Acoustics")
+	int32 TileIndex = INDEX_NONE;
+};
 
 UENUM(BlueprintType)
 enum class ESimulationState : uint8
@@ -58,6 +87,18 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Acoustics")
 	bool bRunOnBeginPlay = false;
+
+	/** Receiver grids (AReceiverGrid, heatmap) add their receivers to every run. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Acoustics")
+	bool bIncludeReceiverGrids = true;
+
+	/** Draws the sampled ray paths of the last result (M3). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Acoustics")
+	TObjectPtr<URayPathVisualizerComponent> PathVisualizer;
+
+	/** One entry per receiver of the last result: point receiver actor or grid tile. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Acoustics|State")
+	TArray<FReceiverBinding> ReceiverBindings;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Acoustics|State")
 	ESimulationState State = ESimulationState::Idle;
@@ -126,8 +167,14 @@ public:
 	/** The level's manager, spawned at the origin when the level has none. */
 	static AAcousticSimulationManager* FindOrSpawn(UWorld* World);
 
-	/** Source position (meters) and receivers of the world; false with a message when one of them is missing. */
-	bool CollectSceneActors(FVector3d& OutSource, TArray<FSolverReceiver>& OutReceivers, FString& OutError) const;
+	/** Source position (meters), receivers of the world (point receivers first, then grid tiles) and their bindings; false with a message when one of them is missing. */
+	bool CollectSceneActors(FVector3d& OutSource, TArray<FSolverReceiver>& OutReceivers, TArray<FReceiverBinding>& OutBindings, FString& OutError) const;
+
+	/** Indices into the last result's receivers that are point receivers (every receiver when the bindings are unknown). */
+	TArray<int32> GetPointReceiverIndices() const;
+
+	/** Pushes the last result to the path visualizer and to every receiver grid of the level. */
+	void UpdateVisualizers();
 
 	/** Extracts the acoustic geometry of the world (meters, BVH built) and applies WallAbsorptionOverride. */
 	bool ExtractScene(FAcousticScene& OutScene, FString& OutError);
@@ -151,6 +198,7 @@ private:
 	UE::Tasks::TTask<void> Task;
 
 	TSharedPtr<const FSimulationResult> LastResult;
+	TArray<FReceiverBinding> PendingBindings;
 	double RunStartSeconds = 0.0;
 	double RunEndSeconds = 0.0;
 	int32 RunCount = 0;

@@ -80,6 +80,14 @@ public:
 	/** Workers actually used for a requested NumThreads. */
 	static int32 ResolveNumWorkers(int32 Requested);
 
+	/**
+	 * Path samples are every Stride-th ray, Stride = max(1, NumRays / MaxPaths), so that min(MaxPaths, NumRays) samples
+	 * cover the whole Fibonacci sphere. The choice depends on the ray index only (deterministic, thread-count invariant).
+	 */
+	static int32 PathSampleStride(int32 NumRays, int32 MaxPaths);
+	static bool IsPathSampled(int32 RayIndex, int32 NumRays, int32 MaxPaths);
+	static int32 NumPathSamples(int32 NumRays, int32 MaxPaths);
+
 	/** Reflected rays start this far from the surface along the facing normal, m. */
 	static constexpr double SurfaceOffset = 1e-7;
 };

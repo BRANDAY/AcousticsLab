@@ -12,14 +12,17 @@
 #include "Results/RoomMetrics.h"
 #include "Scene/AcousticReceiver.h"
 #include "Scene/AcousticSource.h"
+#include "Scene/ReceiverGrid.h"
 #include "Simulation/AcousticSimulationSubsystem.h"
 #include "Solvers/RayTracer.h"
+#include "Visualization/RayPathVisualizerComponent.h"
 
 AAcousticSimulationManager::AAcousticSimulationManager()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = true;
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+	PathVisualizer = CreateDefaultSubobject<URayPathVisualizerComponent>(TEXT("PathVisualizer"));
 }
 
 void AAcousticSimulationManager::BeginPlay()
@@ -89,7 +92,7 @@ AAcousticSimulationManager* AAcousticSimulationManager::FindOrSpawn(UWorld* Worl
 	return Spawned;
 }
 
-bool AAcousticSimulationManager::CollectSceneActors(FVector3d& OutSource, TArray<FSolverReceiver>& OutReceivers, FString& OutError) const
+bool AAcousticSimulationManager::CollectSceneActors(FVector3d& OutSource, TArray<FSolverReceiver>& OutReceivers, TArray<FReceiverBinding>& OutBindings, FString& OutError) const
 {
 	UWorld* World = GetWorld();
 	const TArray<AAcousticSource*> Sources = AAcousticSource::FindAll(World);
@@ -113,17 +116,90 @@ bool AAcousticSimulationManager::CollectSceneActors(FVector3d& OutSource, TArray
 	OutSource = Source->GetPositionMeters();
 
 	OutReceivers.Reset();
-	for (const AAcousticReceiver* Receiver : AAcousticReceiver::FindAll(World))
+	OutBindings.Reset();
+	for (AAcousticReceiver* Receiver : AAcousticReceiver::FindAll(World))
 	{
 		const double Radius = Settings.ReceiverRadius > 0.0f ? static_cast<double>(Settings.ReceiverRadius) : static_cast<double>(Receiver->RadiusMeters);
 		OutReceivers.Emplace(Receiver->ReceiverId.IsNone() ? Receiver->GetName() : Receiver->ReceiverId.ToString(), Receiver->GetPositionMeters(), Radius);
+		FReceiverBinding& Binding = OutBindings.AddDefaulted_GetRef();
+		Binding.Kind = EReceiverBindingKind::Point;
+		Binding.Actor = Receiver;
 	}
+	if (bIncludeReceiverGrids)
+	{
+		for (AReceiverGrid* Grid : AReceiverGrid::FindAll(World))
+		{
+			if (!Grid->bEnabled)
+			{
+				continue;
+			}
+			Grid->AppendSolverReceivers(OutReceivers, Settings.ReceiverRadius > 0.0f ? static_cast<double>(Settings.ReceiverRadius) : 0.0);
+			for (int32 Tile = 0; Tile < Grid->NumTiles(); ++Tile)
+			{
+				FReceiverBinding& Binding = OutBindings.AddDefaulted_GetRef();
+				Binding.Kind = EReceiverBindingKind::GridTile;
+				Binding.Actor = Grid;
+				Binding.TileIndex = Tile;
+			}
+		}
+	}
+	check(OutReceivers.Num() == OutBindings.Num());
 	if (OutReceivers.IsEmpty())
 	{
-		OutError = TEXT("the level has no AAcousticReceiver");
+		OutError = TEXT("the level has no AAcousticReceiver or AReceiverGrid");
 		return false;
 	}
 	return true;
+}
+
+TArray<int32> AAcousticSimulationManager::GetPointReceiverIndices() const
+{
+	TArray<int32> Indices;
+	const int32 NumReceivers = LastResult.IsValid() ? LastResult->Receivers.Num() : 0;
+	if (ReceiverBindings.Num() != NumReceivers)
+	{
+		for (int32 Index = 0; Index < NumReceivers; ++Index)
+		{
+			Indices.Add(Index);
+		}
+		return Indices;
+	}
+	for (int32 Index = 0; Index < NumReceivers; ++Index)
+	{
+		if (ReceiverBindings[Index].Kind == EReceiverBindingKind::Point)
+		{
+			Indices.Add(Index);
+		}
+	}
+	return Indices;
+}
+
+void AAcousticSimulationManager::UpdateVisualizers()
+{
+	if (PathVisualizer)
+	{
+		PathVisualizer->SetResult(LastResult);
+	}
+	const bool bHaveResult = LastResult.IsValid() && LastResult->bSuccess && ReceiverBindings.Num() == LastResult->Receivers.Num();
+	for (AReceiverGrid* Grid : AReceiverGrid::FindAll(GetWorld()))
+	{
+		if (!bHaveResult)
+		{
+			Grid->ClearResult();
+			continue;
+		}
+		TArray<int32> Indices;
+		Indices.Init(INDEX_NONE, Grid->NumTiles());
+		for (int32 Index = 0; Index < ReceiverBindings.Num(); ++Index)
+		{
+			const FReceiverBinding& Binding = ReceiverBindings[Index];
+			if (Binding.Kind == EReceiverBindingKind::GridTile && Binding.Actor.Get() == Grid && Indices.IsValidIndex(Binding.TileIndex))
+			{
+				Indices[Binding.TileIndex] = Index;
+			}
+		}
+		Grid->ApplyResult(*LastResult, Indices);
+	}
 }
 
 bool AAcousticSimulationManager::ExtractScene(FAcousticScene& OutScene, FString& OutError)
@@ -222,11 +298,13 @@ bool AAcousticSimulationManager::Run()
 
 	FVector3d Source;
 	TArray<FSolverReceiver> Receivers;
-	if (!CollectSceneActors(Source, Receivers, Error))
+	TArray<FReceiverBinding> Bindings;
+	if (!CollectSceneActors(Source, Receivers, Bindings, Error))
 	{
 		SetState(ESimulationState::Failed, Error);
 		return false;
 	}
+	PendingBindings = MoveTemp(Bindings);
 
 	FString SolverNote;
 	if (Solver != EAcousticSolver::RayTracer)
@@ -258,7 +336,12 @@ bool AAcousticSimulationManager::Run()
 	{
 		Subsystem->RememberSettings(Settings);
 	}
-	UE_LOG(LogAcoustics, Log, TEXT("Simulation run %d started: %s; scene %s"), RunCount, *Settings.ToString(), *Scene->DescribeStats());
+	int32 NumGridReceivers = 0;
+	for (const FReceiverBinding& Binding : PendingBindings)
+	{
+		NumGridReceivers += Binding.Kind == EReceiverBindingKind::GridTile ? 1 : 0;
+	}
+	UE_LOG(LogAcoustics, Log, TEXT("Simulation run %d started: %s; %d receivers (%d grid tiles); scene %s"), RunCount, *Settings.ToString(), PendingBindings.Num(), NumGridReceivers, *Scene->DescribeStats());
 	SetState(ESimulationState::Running, FString::Printf(TEXT("Tracing %d rays...%s"), Settings.NumRays, *SolverNote));
 	return true;
 }
@@ -303,6 +386,8 @@ void AAcousticSimulationManager::FinishRun()
 {
 	RunEndSeconds = FPlatformTime::Seconds();
 	LastResult = PendingResult;
+	ReceiverBindings = MoveTemp(PendingBindings);
+	PendingBindings.Reset();
 	PendingResult.Reset();
 	SceneForTask.Reset();
 	Task = UE::Tasks::TTask<void>();
@@ -330,6 +415,7 @@ void AAcousticSimulationManager::FinishRun()
 	{
 		SetState(ESimulationState::Failed, LastResult->Error);
 	}
+	UpdateVisualizers();
 	OnResultReady.Broadcast(this, *LastResult);
 }
 

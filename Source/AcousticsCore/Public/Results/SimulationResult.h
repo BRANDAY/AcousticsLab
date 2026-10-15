@@ -24,10 +24,38 @@ struct ACOUSTICSCORE_API FSolverReceiver
 	}
 };
 
-/** One traced path kept for visualization (M3): the emission point, every reflection point and the end point. */
+/** One entry of a path into a receiver sphere (the path continues: receivers are transparent). */
+struct ACOUSTICSCORE_API FPathReceiverHit
+{
+	int32 ReceiverIndex = INDEX_NONE;
+
+	/** Reflection order of the segment that entered the sphere (= index of that segment in Points). */
+	int32 Order = 0;
+
+	/** Entry point on the sphere surface, m, and the arrival time, s. */
+	FVector3d EntryPoint = FVector3d::ZeroVector;
+	double TimeSeconds = 0.0;
+
+	/** Energy of band 0 deposited, relative to the emitted E0. */
+	double Energy = 0.0;
+};
+
+/**
+ * One traced path kept for visualization (M3): the emission point, every reflection point and the end point.
+ * Segment i runs from Points[i] to Points[i + 1] with reflection order i and starts with SegmentEnergies[i].
+ */
 struct ACOUSTICSCORE_API FPathSample
 {
+	/** Emission index of the ray (its Fibonacci-sphere direction and random stream). */
+	int32 RayIndex = INDEX_NONE;
+
 	TArray<FVector3d> Points;
+
+	/** Energy of band 0 at the start of every segment, relative to the emitted E0 (Points.Num() - 1 entries). */
+	TArray<double> SegmentEnergies;
+
+	/** Every receiver entry along the path, in path order. */
+	TArray<FPathReceiverHit> ReceiverHits;
 
 	/** Number of reflections the path went through. */
 	int32 Order = 0;
@@ -40,6 +68,11 @@ struct ACOUSTICSCORE_API FPathSample
 	/** Reflection order of the segment that first entered a receiver, INDEX_NONE when none did. */
 	int32 FirstReceiverHitOrder = INDEX_NONE;
 	int32 FirstReceiverIndex = INDEX_NONE;
+
+	int32 NumSegments() const { return FMath::Max(0, Points.Num() - 1); }
+
+	/** First entry into ReceiverIndex (any receiver when INDEX_NONE), nullptr when the path never entered it. */
+	const FPathReceiverHit* FindReceiverHit(int32 ReceiverIndex) const;
 };
 
 /** Histogram, metrics and direct-sound data of one receiver. */
@@ -83,8 +116,12 @@ struct ACOUSTICSCORE_API FSimulationResult
 	FVector3d SourcePosition = FVector3d::ZeroVector;
 	TArray<FReceiverResult> Receivers;
 
-	/** The first MaxPathsForVisualization rays, in emission order. */
+	/**
+	 * Up to MaxPathsForVisualization rays in emission order: every PathSampleStride-th ray (FRayTracer::PathSampleStride),
+	 * so the samples cover the whole emission sphere. Sampling never changes the histograms.
+	 */
 	TArray<FPathSample> Paths;
+	int32 PathSampleStride = 1;
 
 	FSimulationTiming Timing;
 

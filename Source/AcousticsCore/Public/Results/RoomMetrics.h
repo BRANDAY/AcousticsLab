@@ -108,4 +108,14 @@ namespace RoomAcoustics
 
 	/** Mean free path 4 V / S. */
 	ACOUSTICSCORE_API double MeanFreePath(double VolumeM3, double SurfaceM2);
+
+	/** 10 log10(Energy / Reference), SilenceDb when either is not positive. */
+	ACOUSTICSCORE_API double LevelDb(double Energy, double Reference = 1.0);
+
+	/**
+	 * Sound pressure level of the direct sound at a receiver sphere of radius r that captured the energy fraction
+	 * E_direct = r^2 / (4 d^2) of a source with sound-power level SourcePowerLevelDb: L_W + 10 log10(E_direct / (pi r^2)),
+	 * i.e. L_W - 11 - 20 log10(d) in free field. SilenceDb when the direct sound is occluded (E_direct = 0).
+	 */
+	ACOUSTICSCORE_API double DirectSoundLevelDb(double DirectEnergy, double ReceiverRadius, double SourcePowerLevelDb = 100.0);
 }

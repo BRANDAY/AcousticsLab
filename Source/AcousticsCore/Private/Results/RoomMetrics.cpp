@@ -237,4 +237,23 @@ namespace RoomAcoustics
 	{
 		return SurfaceM2 > 0.0 ? 4.0 * VolumeM3 / SurfaceM2 : 0.0;
 	}
+
+	double LevelDb(double Energy, double Reference)
+	{
+		if (!(Energy > 0.0) || !(Reference > 0.0))
+		{
+			return SilenceDb;
+		}
+		return 10.0 * FMath::LogX(10.0, Energy / Reference);
+	}
+
+	double DirectSoundLevelDb(double DirectEnergy, double ReceiverRadius, double SourcePowerLevelDb)
+	{
+		const double CrossSection = UE_DOUBLE_PI * ReceiverRadius * ReceiverRadius;
+		if (!(DirectEnergy > 0.0) || !(CrossSection > 0.0))
+		{
+			return SilenceDb;
+		}
+		return SourcePowerLevelDb + LevelDb(DirectEnergy, CrossSection);
+	}
 }

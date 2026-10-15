@@ -1,5 +1,10 @@
 #include "Results/SimulationResult.h"
 
+const FPathReceiverHit* FPathSample::FindReceiverHit(int32 ReceiverIndex) const
+{
+	return ReceiverHits.FindByPredicate([ReceiverIndex](const FPathReceiverHit& Hit) { return ReceiverIndex == INDEX_NONE || Hit.ReceiverIndex == ReceiverIndex; });
+}
+
 const FReceiverResult* FSimulationResult::FindReceiver(const FString& Name) const
 {
 	return Receivers.FindByPredicate([&Name](const FReceiverResult& Receiver) { return Receiver.Name == Name; });

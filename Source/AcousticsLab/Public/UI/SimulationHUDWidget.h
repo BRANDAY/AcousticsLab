@@ -1,14 +1,20 @@
-// Simulation panel (SPEC §3.6 HUD): solver settings, Run / Stop, metrics of the selected receiver, timing, Sabine / Eyring.
+// Simulation panel (SPEC §3.6 HUD): solver settings, Run / Stop, metrics of the selected receiver, timing, Sabine / Eyring,
+// visualization toggles (ray paths, heatmap metric) and the impulse-response plot.
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/EditableTextBox.h"
+#include "Types/SlateEnums.h"
 #include "SimulationHUDWidget.generated.h"
 
 class AAcousticSimulationManager;
+class AReceiverGrid;
 class UButton;
 class UCheckBox;
+class UComboBoxString;
+class UHeatmapLegendWidget;
+class UIRPlotWidget;
 class UProgressBar;
 class UTextBlock;
 class UVerticalBox;
@@ -37,8 +43,9 @@ private:
 
 /**
  * Logic lives here; the layout is optional. A Blueprint subclass under Content/UI may provide the BindWidgetOptional
- * slots below, otherwise the widget builds its own panel in C++ (top-right corner), like UMainMenuWidget.
- * It polls the manager every tick (cheap) and rebuilds the metrics text when a run finishes.
+ * slots below, otherwise the widget builds its own panels in C++ (settings top-right, impulse response bottom-left),
+ * like UMainMenuWidget. It polls the manager every tick (cheap) and rebuilds the metrics text when a run finishes.
+ * The receiver selector cycles the point receivers (AAcousticReceiver) only; grid tiles feed the heatmap.
  */
 UCLASS()
 class ACOUSTICSLAB_API USimulationHUDWidget : public UUserWidget
@@ -51,17 +58,28 @@ public:
 	void SetManager(AAcousticSimulationManager* InManager);
 	AAcousticSimulationManager* GetManager() const { return Manager.Get(); }
 
+	/** Selects the Index-th point receiver (wraps around). */
 	UFUNCTION(BlueprintCallable, Category = "Acoustics")
 	void SelectReceiver(int32 Index);
 
+	/** Index of the selected receiver in the result's receiver array. */
 	UFUNCTION(BlueprintPure, Category = "Acoustics")
 	int32 GetSelectedReceiver() const { return SelectedReceiver; }
 
-	/** Reloads the settings fields, the status, the metrics and the reference block from the manager. */
+	/** Keeps the curve of the selected receiver in plot slot 1 or 2 (alternating) for comparison. */
+	UFUNCTION(BlueprintCallable, Category = "Acoustics")
+	void PinCurrentCurve();
+
+	UFUNCTION(BlueprintCallable, Category = "Acoustics")
+	void ClearPinnedCurves();
+
+	/** Reloads the settings fields, the status, the metrics, the reference block, the plot and the visualization block from the manager. */
 	UFUNCTION(BlueprintCallable, Category = "Acoustics")
 	void RefreshAll();
 
-	/** Setting fields by id: NumRays, MaxOrder, Seed, ReceiverRadius, BinMs, TMax, AirAbsorption, NumThreads, WallAlpha. */
+	UIRPlotWidget* GetIRPlot() const { return IRPlot; }
+
+	/** Setting fields by id: NumRays, MaxOrder, Seed, ReceiverRadius, BinMs, TMax, AirAbsorption, NumThreads, WallAlpha, DrawOrder. */
 	static TArray<FName> SettingFieldIds();
 
 protected:
@@ -112,11 +130,41 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
 	TObjectPtr<UCheckBox> AirAbsorptionCheck;
 
+	// Visualization block (M3).
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UCheckBox> PathsCheck;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UCheckBox> OnlyReachingCheck;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UCheckBox> HeatmapCheck;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UComboBoxString> MetricCombo;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UHeatmapLegendWidget> HeatmapLegend;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> VisualizationText;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UIRPlotWidget> IRPlot;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UButton> PinCurveButton;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UButton> ClearCurvesButton;
+
 private:
 	void BuildDefaultTree();
 	void BuildSettingsRows();
+	void BuildVisualizationBlock(UVerticalBox* Column);
 	UTextBlock* MakeText(FName Name, int32 FontSize, const FLinearColor& Color, bool bBold = false);
 	UButton* MakeButton(FName Name, const FText& Label, const FLinearColor& Color);
+	USimulationSettingField* MakeField(FName Id, float Width);
 
 	UFUNCTION()
 	void HandleRunClicked();
@@ -133,6 +181,24 @@ private:
 	UFUNCTION()
 	void HandleAirAbsorptionChanged(bool bChecked);
 
+	UFUNCTION()
+	void HandlePathsChanged(bool bChecked);
+
+	UFUNCTION()
+	void HandleOnlyReachingChanged(bool bChecked);
+
+	UFUNCTION()
+	void HandleHeatmapChanged(bool bChecked);
+
+	UFUNCTION()
+	void HandleMetricChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	UFUNCTION()
+	void HandlePinCurveClicked();
+
+	UFUNCTION()
+	void HandleClearCurvesClicked();
+
 	void HandleFieldCommitted(FName FieldId, const FText& Text);
 	void HandleResultReady(AAcousticSimulationManager* InManager, const FSimulationResult& Result);
 
@@ -140,6 +206,9 @@ private:
 	void RefreshStatus();
 	void RefreshMetrics();
 	void RefreshReference();
+	void RefreshPlot();
+	void RefreshVisualization();
+	TArray<AReceiverGrid*> FindGrids() const;
 
 	TWeakObjectPtr<AAcousticSimulationManager> Manager;
 	FDelegateHandle ResultHandle;
@@ -149,5 +218,6 @@ private:
 
 	int32 SelectedReceiver = 0;
 	int32 ShownRunCount = -1;
+	int32 NextPinSlot = 1;
 	float StatusRefreshAccumulator = 0.0f;
 };

@@ -95,8 +95,11 @@ namespace
 
 		if (Path)
 		{
+			Path->RayIndex = RayIndex;
 			Path->Points.Reset();
 			Path->Points.Add(Origin);
+			Path->SegmentEnergies.Reset();
+			Path->ReceiverHits.Reset();
 		}
 
 		for (;;)
@@ -108,6 +111,10 @@ namespace
 			const bool bHit = Settings.bUseBVH ? Context.Scene.IntersectRay(Ray, Hit, Options) : Context.Scene.IntersectRayBruteForce(Ray, Hit, Options);
 			const double SegmentLength = bHit ? Hit.T : (Context.MaxPathLength - PathLength);
 			++Out.NumSegments;
+			if (Path)
+			{
+				Path->SegmentEnergies.Add(Context.E0 > 0.0 ? Energy[0] / Context.E0 : 0.0);
+			}
 
 			// Receivers are transparent: the energy is recorded at the entry point and the ray continues.
 			// Order-0 segments are skipped when the direct sound is added analytically (SPEC §2.2.7).
@@ -130,11 +137,20 @@ namespace
 					if (Out.Histograms[ReceiverIndex].AddEnergy(Time, Deposit))
 					{
 						++Out.ReceiverHits[ReceiverIndex];
-						if (Path && !bReachedReceiver)
+						if (Path)
 						{
-							Path->bReachedReceiver = true;
-							Path->FirstReceiverHitOrder = Order;
-							Path->FirstReceiverIndex = ReceiverIndex;
+							if (!bReachedReceiver)
+							{
+								Path->bReachedReceiver = true;
+								Path->FirstReceiverHitOrder = Order;
+								Path->FirstReceiverIndex = ReceiverIndex;
+							}
+							FPathReceiverHit& PathHit = Path->ReceiverHits.AddDefaulted_GetRef();
+							PathHit.ReceiverIndex = ReceiverIndex;
+							PathHit.Order = Order;
+							PathHit.EntryPoint = Origin + Direction * Entry;
+							PathHit.TimeSeconds = Time;
+							PathHit.Energy = Context.E0 > 0.0 ? Deposit[0] / Context.E0 : 0.0;
 						}
 						bReachedReceiver = true;
 					}
@@ -216,12 +232,17 @@ namespace
 		}
 		Out.ReceiverHits.Init(0, Context.Receivers.Num());
 
-		const int32 NumPaths = FMath::Clamp(Settings.MaxPathsForVisualization - FirstRay, 0, EndRay - FirstRay);
-		Out.Paths.SetNum(NumPaths);
+		// Path samples: every Stride-th ray (FRayTracer::PathSampleStride), appended in ray order.
+		int32 NumPaths = 0;
+		for (int32 RayIndex = FirstRay; RayIndex < EndRay; ++RayIndex)
+		{
+			NumPaths += FRayTracer::IsPathSampled(RayIndex, Settings.NumRays, Settings.MaxPathsForVisualization) ? 1 : 0;
+		}
+		Out.Paths.Reset(NumPaths);
 
 		for (int32 RayIndex = FirstRay; RayIndex < EndRay; ++RayIndex)
 		{
-			FPathSample* Path = RayIndex - FirstRay < NumPaths ? &Out.Paths[RayIndex - FirstRay] : nullptr;
+			FPathSample* Path = FRayTracer::IsPathSampled(RayIndex, Settings.NumRays, Settings.MaxPathsForVisualization) ? &Out.Paths.AddDefaulted_GetRef() : nullptr;
 			TraceRay(Context, RayIndex, Out, Path);
 		}
 	}
@@ -280,6 +301,35 @@ int32 FRayTracer::ResolveNumWorkers(int32 Requested)
 	return FMath::Max(1, FPlatformMisc::NumberOfWorkerThreadsToSpawn());
 }
 
+int32 FRayTracer::PathSampleStride(int32 NumRays, int32 MaxPaths)
+{
+	if (NumRays <= 0 || MaxPaths <= 0)
+	{
+		return 1;
+	}
+	return FMath::Max(1, NumRays / MaxPaths);
+}
+
+bool FRayTracer::IsPathSampled(int32 RayIndex, int32 NumRays, int32 MaxPaths)
+{
+	if (MaxPaths <= 0 || RayIndex < 0 || RayIndex >= NumRays)
+	{
+		return false;
+	}
+	const int32 Stride = PathSampleStride(NumRays, MaxPaths);
+	return RayIndex % Stride == 0 && RayIndex / Stride < MaxPaths;
+}
+
+int32 FRayTracer::NumPathSamples(int32 NumRays, int32 MaxPaths)
+{
+	if (MaxPaths <= 0 || NumRays <= 0)
+	{
+		return 0;
+	}
+	const int32 Stride = PathSampleStride(NumRays, MaxPaths);
+	return FMath::Min(MaxPaths, FMath::DivideAndRoundUp(NumRays, Stride));
+}
+
 FSimulationResult FRayTracer::Run(const FAcousticScene& Scene, const FVector3d& Source, TConstArrayView<FSolverReceiver> InReceivers, const FRayTracerSettings& Settings, FSolverProgress* Progress)
 {
 	SCOPE_CYCLE_COUNTER(STAT_AcousticsRayTracerRun);
@@ -291,6 +341,7 @@ FSimulationResult FRayTracer::Run(const FAcousticScene& Scene, const FVector3d& 
 	Result.SourcePosition = Source;
 	Result.NumRays = Settings.NumRays;
 	Result.NumTriangles = Scene.NumTriangles();
+	Result.PathSampleStride = PathSampleStride(Settings.NumRays, Settings.MaxPathsForVisualization);
 
 	if (!Settings.Validate(Result.Error))
 	{

@@ -8,6 +8,7 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/CheckBox.h"
+#include "Components/ComboBoxString.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/ProgressBar.h"
@@ -16,8 +17,13 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Results/SimulationResult.h"
+#include "Scene/ReceiverGrid.h"
 #include "Simulation/AcousticSimulationManager.h"
 #include "Styling/CoreStyle.h"
+#include "UI/HeatmapLegendWidget.h"
+#include "UI/IRPlotWidget.h"
+#include "Visualization/HeatmapComponent.h"
+#include "Visualization/RayPathVisualizerComponent.h"
 
 #define LOCTEXT_NAMESPACE "AcousticsSimulationHUD"
 
@@ -32,6 +38,7 @@ namespace
 	const FName FieldAirAbsorption(TEXT("AirAbsorption"));
 	const FName FieldNumThreads(TEXT("NumThreads"));
 	const FName FieldWallAlpha(TEXT("WallAlpha"));
+	const FName FieldDrawOrder(TEXT("DrawOrder"));
 
 	const FLinearColor PanelColor(0.02f, 0.025f, 0.035f, 0.85f);
 	const FLinearColor LabelColor(0.75f, 0.75f, 0.8f);
@@ -65,7 +72,7 @@ USimulationHUDWidget::USimulationHUDWidget(const FObjectInitializer& ObjectIniti
 
 TArray<FName> USimulationHUDWidget::SettingFieldIds()
 {
-	return { FieldNumRays, FieldMaxOrder, FieldSeed, FieldReceiverRadius, FieldBinMs, FieldTMax, FieldAirAbsorption, FieldNumThreads, FieldWallAlpha };
+	return { FieldNumRays, FieldMaxOrder, FieldSeed, FieldReceiverRadius, FieldBinMs, FieldTMax, FieldAirAbsorption, FieldNumThreads, FieldWallAlpha, FieldDrawOrder };
 }
 
 void USimulationHUDWidget::SetManager(AAcousticSimulationManager* InManager)
@@ -115,6 +122,37 @@ void USimulationHUDWidget::NativeConstruct()
 	if (AirAbsorptionCheck)
 	{
 		AirAbsorptionCheck->OnCheckStateChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleAirAbsorptionChanged);
+	}
+	if (PathsCheck)
+	{
+		PathsCheck->OnCheckStateChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandlePathsChanged);
+	}
+	if (OnlyReachingCheck)
+	{
+		OnlyReachingCheck->OnCheckStateChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleOnlyReachingChanged);
+	}
+	if (HeatmapCheck)
+	{
+		HeatmapCheck->OnCheckStateChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleHeatmapChanged);
+	}
+	if (MetricCombo)
+	{
+		if (MetricCombo->GetOptionCount() == 0)
+		{
+			for (const EHeatmapMetric Metric : UHeatmapComponent::AllMetrics())
+			{
+				MetricCombo->AddOption(UHeatmapComponent::MetricLabel(Metric).ToString());
+			}
+		}
+		MetricCombo->OnSelectionChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleMetricChanged);
+	}
+	if (PinCurveButton)
+	{
+		PinCurveButton->OnClicked.AddUniqueDynamic(this, &USimulationHUDWidget::HandlePinCurveClicked);
+	}
+	if (ClearCurvesButton)
+	{
+		ClearCurvesButton->OnClicked.AddUniqueDynamic(this, &USimulationHUDWidget::HandleClearCurvesClicked);
 	}
 	if (SettingsBox && Fields.IsEmpty())
 	{
@@ -166,6 +204,18 @@ UButton* USimulationHUDWidget::MakeButton(FName Name, const FText& Label, const 
 		TextSlot->SetHorizontalAlignment(HAlign_Center);
 	}
 	return Button;
+}
+
+USimulationSettingField* USimulationHUDWidget::MakeField(FName Id, float Width)
+{
+	USimulationSettingField* Field = WidgetTree->ConstructWidget<USimulationSettingField>(USimulationSettingField::StaticClass());
+	Field->FieldId = Id;
+	Field->OnFieldCommitted.BindUObject(this, &USimulationHUDWidget::HandleFieldCommitted);
+	Field->BindCommit();
+	Field->SetMinDesiredWidth(Width);
+	Field->SetJustification(ETextJustify::Right);
+	Fields.Add(Id, Field);
+	return Field;
 }
 
 void USimulationHUDWidget::BuildDefaultTree()
@@ -256,9 +306,132 @@ void USimulationHUDWidget::BuildDefaultTree()
 	ReferenceText = MakeText(TEXT("ReferenceText"), 11, AccentColor);
 	AddRow(ReferenceText, 0.f, 6.f);
 
+	BuildVisualizationBlock(Column);
+
 	HintText = MakeText(TEXT("HintText"), 10, MutedColor);
 	HintText->SetText(LOCTEXT("Hint", "Tab: cursor / fly   Enter in a field applies it   Esc: main menu"));
 	AddRow(HintText, 0.f, 0.f);
+
+	// Impulse-response panel, bottom-left.
+	UBorder* PlotPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("PlotPanel"));
+	PlotPanel->SetBrushColor(PanelColor);
+	PlotPanel->SetPadding(FMargin(10.f, 8.f));
+	if (UCanvasPanelSlot* PlotSlot = Root->AddChildToCanvas(PlotPanel))
+	{
+		PlotSlot->SetAnchors(FAnchors(0.f, 1.f, 0.f, 1.f));
+		PlotSlot->SetAlignment(FVector2D(0.f, 1.f));
+		PlotSlot->SetPosition(FVector2D(24.f, -24.f));
+		PlotSlot->SetAutoSize(true);
+	}
+	UVerticalBox* PlotColumn = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("PlotColumn"));
+	PlotPanel->SetContent(PlotColumn);
+
+	UHorizontalBox* PlotHeader = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("PlotHeader"));
+	UTextBlock* PlotTitle = MakeText(TEXT("PlotTitle"), 13, AccentColor, true);
+	PlotTitle->SetText(LOCTEXT("PlotTitle", "Impulse response: energy (thin) and Schroeder decay (thick)"));
+	if (UHorizontalBoxSlot* TitleSlot = PlotHeader->AddChildToHorizontalBox(PlotTitle))
+	{
+		TitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		TitleSlot->SetVerticalAlignment(VAlign_Center);
+	}
+	PinCurveButton = MakeButton(TEXT("PinCurveButton"), LOCTEXT("Pin", "Pin"), FLinearColor(0.14f, 0.17f, 0.22f));
+	ClearCurvesButton = MakeButton(TEXT("ClearCurvesButton"), LOCTEXT("ClearCurves", "Clear"), FLinearColor(0.14f, 0.17f, 0.22f));
+	if (UHorizontalBoxSlot* PinSlot = PlotHeader->AddChildToHorizontalBox(PinCurveButton))
+	{
+		PinSlot->SetPadding(FMargin(8.f, 0.f, 4.f, 0.f));
+	}
+	PlotHeader->AddChildToHorizontalBox(ClearCurvesButton);
+	if (UVerticalBoxSlot* HeaderSlot = PlotColumn->AddChildToVerticalBox(PlotHeader))
+	{
+		HeaderSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+	}
+
+	IRPlot = WidgetTree->ConstructWidget<UIRPlotWidget>(UIRPlotWidget::StaticClass(), TEXT("IRPlot"));
+	USizeBox* PlotSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("PlotSize"));
+	PlotSize->SetWidthOverride(460.f);
+	PlotSize->SetHeightOverride(210.f);
+	PlotSize->SetContent(IRPlot);
+	PlotColumn->AddChildToVerticalBox(PlotSize);
+}
+
+void USimulationHUDWidget::BuildVisualizationBlock(UVerticalBox* Column)
+{
+	auto AddRow = [Column](UWidget* Widget, float Top, float Bottom)
+	{
+		if (UVerticalBoxSlot* RowSlot = Column->AddChildToVerticalBox(Widget))
+		{
+			RowSlot->SetPadding(FMargin(0.f, Top, 0.f, Bottom));
+			RowSlot->SetHorizontalAlignment(HAlign_Fill);
+		}
+	};
+	auto AddLabel = [this](UHorizontalBox* Row, const FText& Label, float LeftPadding)
+	{
+		UTextBlock* Text = MakeText(NAME_None, 11, LabelColor);
+		Text->SetText(Label);
+		if (UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(Text))
+		{
+			TextSlot->SetVerticalAlignment(VAlign_Center);
+			TextSlot->SetPadding(FMargin(LeftPadding, 0.f, 4.f, 0.f));
+		}
+	};
+	auto AddCheck = [this](UHorizontalBox* Row, FName Name, float LeftPadding) -> UCheckBox*
+	{
+		UCheckBox* Check = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), Name);
+		if (UHorizontalBoxSlot* CheckSlot = Row->AddChildToHorizontalBox(Check))
+		{
+			CheckSlot->SetVerticalAlignment(VAlign_Center);
+			CheckSlot->SetPadding(FMargin(LeftPadding, 0.f, 0.f, 0.f));
+		}
+		return Check;
+	};
+
+	UTextBlock* Title = MakeText(TEXT("VisualizationTitle"), 12, AccentColor, true);
+	Title->SetText(LOCTEXT("VisualizationTitle", "Visualization"));
+	AddRow(Title, 2.f, 2.f);
+
+	// Row 1: paths.
+	UHorizontalBox* PathRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("PathRow"));
+	PathsCheck = AddCheck(PathRow, TEXT("PathsCheck"), 0.f);
+	AddLabel(PathRow, LOCTEXT("Paths", "Ray paths"), 4.f);
+	OnlyReachingCheck = AddCheck(PathRow, TEXT("OnlyReachingCheck"), 10.f);
+	AddLabel(PathRow, LOCTEXT("OnlyReaching", "Only to receiver"), 4.f);
+	AddLabel(PathRow, LOCTEXT("DrawOrder", "Order <="), 10.f);
+	USimulationSettingField* OrderField = MakeField(FieldDrawOrder, 40.f);
+	USizeBox* OrderSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	OrderSize->SetWidthOverride(44.f);
+	OrderSize->SetContent(OrderField);
+	if (UHorizontalBoxSlot* OrderSlot = PathRow->AddChildToHorizontalBox(OrderSize))
+	{
+		OrderSlot->SetVerticalAlignment(VAlign_Center);
+	}
+	AddRow(PathRow, 0.f, 3.f);
+
+	// Row 2: heatmap and metric.
+	UHorizontalBox* HeatRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HeatRow"));
+	HeatmapCheck = AddCheck(HeatRow, TEXT("HeatmapCheck"), 0.f);
+	AddLabel(HeatRow, LOCTEXT("Heatmap", "Heatmap"), 4.f);
+	AddLabel(HeatRow, LOCTEXT("Metric", "Metric"), 10.f);
+	MetricCombo = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("MetricCombo"));
+	for (const EHeatmapMetric Metric : UHeatmapComponent::AllMetrics())
+	{
+		MetricCombo->AddOption(UHeatmapComponent::MetricLabel(Metric).ToString());
+	}
+	MetricCombo->SetSelectedIndex(1);
+	if (UHorizontalBoxSlot* ComboSlot = HeatRow->AddChildToHorizontalBox(MetricCombo))
+	{
+		ComboSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		ComboSlot->SetVerticalAlignment(VAlign_Center);
+	}
+	AddRow(HeatRow, 0.f, 3.f);
+
+	HeatmapLegend = WidgetTree->ConstructWidget<UHeatmapLegendWidget>(UHeatmapLegendWidget::StaticClass(), TEXT("HeatmapLegend"));
+	USizeBox* LegendSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("LegendSize"));
+	LegendSize->SetHeightOverride(26.f);
+	LegendSize->SetContent(HeatmapLegend);
+	AddRow(LegendSize, 0.f, 3.f);
+
+	VisualizationText = MakeText(TEXT("VisualizationText"), 10, MutedColor);
+	AddRow(VisualizationText, 0.f, 6.f);
 }
 
 void USimulationHUDWidget::BuildSettingsRows()
@@ -268,7 +441,10 @@ void USimulationHUDWidget::BuildSettingsRows()
 		return;
 	}
 	SettingsBox->ClearChildren();
-	Fields.Reset();
+	for (const FName& Id : { FieldNumRays, FieldMaxOrder, FieldSeed, FieldReceiverRadius, FieldBinMs, FieldTMax, FieldNumThreads, FieldWallAlpha, FieldAirAbsorption })
+	{
+		Fields.Remove(Id);
+	}
 
 	struct FRowSpec
 	{
@@ -300,13 +476,7 @@ void USimulationHUDWidget::BuildSettingsRows()
 			LabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
 		}
 
-		USimulationSettingField* Field = WidgetTree->ConstructWidget<USimulationSettingField>(USimulationSettingField::StaticClass());
-		Field->FieldId = Row.Id;
-		Field->OnFieldCommitted.BindUObject(this, &USimulationHUDWidget::HandleFieldCommitted);
-		Field->BindCommit();
-		Field->SetMinDesiredWidth(84.f);
-		Field->SetJustification(ETextJustify::Right);
-		Fields.Add(Row.Id, Field);
+		USimulationSettingField* Field = MakeField(Row.Id, 84.f);
 
 		USizeBox* FieldSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 		FieldSize->SetWidthOverride(84.f);
@@ -355,12 +525,16 @@ void USimulationHUDWidget::HandleStopClicked()
 
 void USimulationHUDWidget::HandlePrevReceiverClicked()
 {
-	SelectReceiver(SelectedReceiver - 1);
+	const AAcousticSimulationManager* Current = Manager.Get();
+	const int32 Position = Current ? Current->GetPointReceiverIndices().IndexOfByKey(SelectedReceiver) : INDEX_NONE;
+	SelectReceiver((Position == INDEX_NONE ? 0 : Position) - 1);
 }
 
 void USimulationHUDWidget::HandleNextReceiverClicked()
 {
-	SelectReceiver(SelectedReceiver + 1);
+	const AAcousticSimulationManager* Current = Manager.Get();
+	const int32 Position = Current ? Current->GetPointReceiverIndices().IndexOfByKey(SelectedReceiver) : INDEX_NONE;
+	SelectReceiver((Position == INDEX_NONE ? 0 : Position) + 1);
 }
 
 void USimulationHUDWidget::HandleAirAbsorptionChanged(bool bChecked)
@@ -369,6 +543,103 @@ void USimulationHUDWidget::HandleAirAbsorptionChanged(bool bChecked)
 	{
 		Current->Settings.bAirAbsorption = bChecked;
 	}
+}
+
+void USimulationHUDWidget::HandlePathsChanged(bool bChecked)
+{
+	if (AAcousticSimulationManager* Current = Manager.Get())
+	{
+		if (Current->PathVisualizer)
+		{
+			Current->PathVisualizer->SetEnabled(bChecked);
+		}
+	}
+	RefreshVisualization();
+}
+
+void USimulationHUDWidget::HandleOnlyReachingChanged(bool bChecked)
+{
+	if (AAcousticSimulationManager* Current = Manager.Get())
+	{
+		if (Current->PathVisualizer)
+		{
+			Current->PathVisualizer->SetReceiverFilter(SelectedReceiver);
+			Current->PathVisualizer->SetOnlyPathsReachingReceiver(bChecked);
+		}
+	}
+	RefreshVisualization();
+}
+
+void USimulationHUDWidget::HandleHeatmapChanged(bool bChecked)
+{
+	for (AReceiverGrid* Grid : FindGrids())
+	{
+		if (Grid->Heatmap)
+		{
+			Grid->Heatmap->SetHiddenInGame(!bChecked);
+			Grid->Heatmap->SetVisibility(bChecked);
+		}
+	}
+	RefreshVisualization();
+}
+
+void USimulationHUDWidget::HandleMetricChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
+{
+	const TArray<EHeatmapMetric> Metrics = UHeatmapComponent::AllMetrics();
+	const int32 Index = MetricCombo ? MetricCombo->GetSelectedIndex() : INDEX_NONE;
+	if (!Metrics.IsValidIndex(Index))
+	{
+		return;
+	}
+	for (AReceiverGrid* Grid : FindGrids())
+	{
+		if (Grid->Heatmap)
+		{
+			Grid->Heatmap->SetMetric(Metrics[Index]);
+		}
+	}
+	RefreshVisualization();
+}
+
+void USimulationHUDWidget::HandlePinCurveClicked()
+{
+	PinCurrentCurve();
+}
+
+void USimulationHUDWidget::HandleClearCurvesClicked()
+{
+	ClearPinnedCurves();
+}
+
+void USimulationHUDWidget::PinCurrentCurve()
+{
+	const AAcousticSimulationManager* Current = Manager.Get();
+	const FSimulationResult* Result = Current ? Current->GetLastResult() : nullptr;
+	if (!IRPlot || !Result || !Result->bSuccess || !Result->Receivers.IsValidIndex(SelectedReceiver))
+	{
+		return;
+	}
+	const int32 CurveSlot = FMath::Clamp(NextPinSlot, 1, UIRPlotWidget::MaxCurves - 1);
+	const FReceiverResult& Receiver = Result->Receivers[SelectedReceiver];
+	IRPlot->SetCurve(CurveSlot, Receiver, FString::Printf(TEXT("%s #%d"), *Receiver.Name, Current->GetRunCount()), UIRPlotWidget::SlotColor(CurveSlot));
+	NextPinSlot = CurveSlot + 1 < UIRPlotWidget::MaxCurves ? CurveSlot + 1 : 1;
+}
+
+void USimulationHUDWidget::ClearPinnedCurves()
+{
+	if (IRPlot)
+	{
+		for (int32 CurveSlot = 1; CurveSlot < UIRPlotWidget::MaxCurves; ++CurveSlot)
+		{
+			IRPlot->ClearCurve(CurveSlot);
+		}
+	}
+	NextPinSlot = 1;
+}
+
+TArray<AReceiverGrid*> USimulationHUDWidget::FindGrids() const
+{
+	return AReceiverGrid::FindAll(GetWorld());
 }
 
 void USimulationHUDWidget::HandleFieldCommitted(FName FieldId, const FText& Text)
@@ -419,23 +690,50 @@ void USimulationHUDWidget::HandleFieldCommitted(FName FieldId, const FText& Text
 	{
 		Current->WallAbsorptionOverride = FMath::Clamp(FloatValue, 0.0f, 0.99f);
 	}
+	else if (FieldId == FieldDrawOrder)
+	{
+		if (Current->PathVisualizer)
+		{
+			Current->PathVisualizer->SetMaxDrawOrder(FMath::Clamp(IntValue, 0, 100000));
+		}
+		RefreshVisualization();
+	}
 	LoadFieldsFromManager();
 }
 
 void USimulationHUDWidget::HandleResultReady(AAcousticSimulationManager* InManager, const FSimulationResult& Result)
 {
+	// Keep the selection on a point receiver of the new result.
+	const TArray<int32> Points = InManager ? InManager->GetPointReceiverIndices() : TArray<int32>();
+	if (Points.Num() > 0 && !Points.Contains(SelectedReceiver))
+	{
+		SelectedReceiver = Points[0];
+	}
+	if (InManager && InManager->PathVisualizer)
+	{
+		InManager->PathVisualizer->SetReceiverFilter(SelectedReceiver);
+	}
 	RefreshMetrics();
 	RefreshReference();
+	RefreshPlot();
+	RefreshVisualization();
 	RefreshStatus();
 }
 
 void USimulationHUDWidget::SelectReceiver(int32 Index)
 {
 	const AAcousticSimulationManager* Current = Manager.Get();
-	const FSimulationResult* Result = Current ? Current->GetLastResult() : nullptr;
-	const int32 Count = Result ? Result->Receivers.Num() : 0;
-	SelectedReceiver = Count > 0 ? ((Index % Count) + Count) % Count : 0;
+	const TArray<int32> Points = Current ? Current->GetPointReceiverIndices() : TArray<int32>();
+	const int32 Count = Points.Num();
+	SelectedReceiver = Count > 0 ? Points[((Index % Count) + Count) % Count] : 0;
+	if (Current && Current->PathVisualizer)
+	{
+		Current->PathVisualizer->SetReceiverFilter(SelectedReceiver);
+	}
 	RefreshMetrics();
+	RefreshReference();
+	RefreshPlot();
+	RefreshVisualization();
 }
 
 void USimulationHUDWidget::RefreshAll()
@@ -444,6 +742,8 @@ void USimulationHUDWidget::RefreshAll()
 	RefreshStatus();
 	RefreshMetrics();
 	RefreshReference();
+	RefreshPlot();
+	RefreshVisualization();
 }
 
 void USimulationHUDWidget::LoadFieldsFromManager()
@@ -473,6 +773,33 @@ void USimulationHUDWidget::LoadFieldsFromManager()
 	if (AirAbsorptionCheck)
 	{
 		AirAbsorptionCheck->SetIsChecked(Settings.bAirAbsorption);
+	}
+	if (const URayPathVisualizerComponent* Paths = Current->PathVisualizer)
+	{
+		SetField(FieldDrawOrder, FString::FromInt(Paths->MaxDrawOrder));
+		if (PathsCheck)
+		{
+			PathsCheck->SetIsChecked(Paths->bEnabled);
+		}
+		if (OnlyReachingCheck)
+		{
+			OnlyReachingCheck->SetIsChecked(Paths->bOnlyPathsReachingReceiver);
+		}
+	}
+	const TArray<AReceiverGrid*> Grids = FindGrids();
+	const UHeatmapComponent* Heatmap = Grids.Num() > 0 ? Grids[0]->Heatmap.Get() : nullptr;
+	if (HeatmapCheck)
+	{
+		HeatmapCheck->SetIsChecked(Heatmap ? Heatmap->IsVisible() : false);
+		HeatmapCheck->SetIsEnabled(Heatmap != nullptr);
+	}
+	if (MetricCombo && Heatmap)
+	{
+		const int32 MetricIndex = UHeatmapComponent::AllMetrics().IndexOfByKey(Heatmap->Metric);
+		if (MetricIndex != INDEX_NONE && MetricCombo->GetSelectedIndex() != MetricIndex)
+		{
+			MetricCombo->SetSelectedIndex(MetricIndex);
+		}
 	}
 }
 
@@ -524,6 +851,8 @@ void USimulationHUDWidget::RefreshStatus()
 		ShownRunCount = Current->GetRunCount();
 		RefreshMetrics();
 		RefreshReference();
+		RefreshPlot();
+		RefreshVisualization();
 	}
 }
 
@@ -554,7 +883,9 @@ void USimulationHUDWidget::RefreshMetrics()
 
 	if (ReceiverText)
 	{
-		ReceiverText->SetText(FText::FromString(FString::Printf(TEXT("%s  (%d / %d)"), *Receiver.Name, SelectedReceiver + 1, Result->Receivers.Num())));
+		const TArray<int32> Points = Current->GetPointReceiverIndices();
+		const int32 Position = Points.IndexOfByKey(SelectedReceiver);
+		ReceiverText->SetText(FText::FromString(FString::Printf(TEXT("%s  (%d / %d)"), *Receiver.Name, Position == INDEX_NONE ? SelectedReceiver + 1 : Position + 1, Points.Num() > 0 ? Points.Num() : Result->Receivers.Num())));
 	}
 	if (MetricsText)
 	{
@@ -604,6 +935,61 @@ void USimulationHUDWidget::RefreshReference()
 		}
 	}
 	ReferenceText->SetText(FText::FromString(Text));
+}
+
+void USimulationHUDWidget::RefreshPlot()
+{
+	if (!IRPlot)
+	{
+		return;
+	}
+	const AAcousticSimulationManager* Current = Manager.Get();
+	const FSimulationResult* Result = Current ? Current->GetLastResult() : nullptr;
+	if (!Result || !Result->bSuccess || !Result->Receivers.IsValidIndex(SelectedReceiver))
+	{
+		IRPlot->ClearCurve(0);
+		return;
+	}
+	const FReceiverResult& Receiver = Result->Receivers[SelectedReceiver];
+	IRPlot->SetCurve(0, Receiver, FString::Printf(TEXT("%s #%d"), *Receiver.Name, Current->GetRunCount()), UIRPlotWidget::SlotColor(0));
+}
+
+void USimulationHUDWidget::RefreshVisualization()
+{
+	const AAcousticSimulationManager* Current = Manager.Get();
+	const URayPathVisualizerComponent* Paths = Current ? Current->PathVisualizer.Get() : nullptr;
+	const FSimulationResult* Result = Current ? Current->GetLastResult() : nullptr;
+
+	if (VisualizationText)
+	{
+		FString Text;
+		if (Paths && Result && Result->bSuccess)
+		{
+			Text = FString::Printf(TEXT("Paths: %d drawn of %d matching (%d sampled, every %d-th ray), %d segments"),
+				Paths->GetNumDrawnPaths(), Paths->GetNumMatchingPaths(), Result->Paths.Num(), Result->PathSampleStride, Paths->GetNumDrawnSegments());
+		}
+		else
+		{
+			Text = TEXT("Paths: no result yet");
+		}
+		VisualizationText->SetText(FText::FromString(Text));
+	}
+
+	if (HeatmapLegend)
+	{
+		const TArray<AReceiverGrid*> Grids = FindGrids();
+		const UHeatmapComponent* Heatmap = Grids.Num() > 0 ? Grids[0]->Heatmap.Get() : nullptr;
+		if (Heatmap)
+		{
+			const bool bHasData = Heatmap->HasSamples() && Heatmap->NumValidTiles > 0;
+			const FText Label = FText::Format(LOCTEXT("LegendLabel", "{0} ({1} tiles)"), UHeatmapComponent::MetricLabel(Heatmap->Metric), Heatmap->NumValidTiles);
+			HeatmapLegend->SetRange(Label, Heatmap->ShownMin, Heatmap->ShownMax, UHeatmapComponent::MetricUnits(Heatmap->Metric), bHasData);
+		}
+		else
+		{
+			HeatmapLegend->SetRange(LOCTEXT("NoGrid", "No receiver grid in this level"), 0.f, 0.f, FString(), false);
+		}
+	}
 }
 
 #undef LOCTEXT_NAMESPACE
