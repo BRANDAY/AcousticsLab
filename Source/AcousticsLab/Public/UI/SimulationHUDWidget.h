@@ -5,18 +5,22 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/EditableTextBox.h"
+#include "Simulation/SolverSettings.h"
 #include "Types/SlateEnums.h"
 #include "SimulationHUDWidget.generated.h"
 
 class AAcousticSimulationManager;
 class AReceiverGrid;
 class UAuralizationComponent;
+class UBeamVisualizerComponent;
 class UButton;
 class UCheckBox;
 class UComboBoxString;
 class UHeatmapLegendWidget;
+class UImageSourceVisualizerComponent;
 class UIRPlotWidget;
 class UProgressBar;
+class USlider;
 class UTextBlock;
 class UVerticalBox;
 struct FSimulationResult;
@@ -80,7 +84,7 @@ public:
 
 	UIRPlotWidget* GetIRPlot() const { return IRPlot; }
 
-	/** Setting fields by id: NumRays, MaxOrder, Seed, ReceiverRadius, BinMs, TMax, AirAbsorption, NumThreads, WallAlpha, DrawOrder. */
+	/** Setting fields by id: NumRays, MaxOrder, Seed, ReceiverRadius, BinMs, TMax, AirAbsorption, NumThreads, WallAlpha, DrawOrder, ImageOrder, BeamSubdiv, BeamOrder. */
 	static TArray<FName> SettingFieldIds();
 
 protected:
@@ -131,6 +135,10 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
 	TObjectPtr<UCheckBox> AirAbsorptionCheck;
 
+	/** Solver selector (M5): Ray tracer / Image sources / Beam tracer. */
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UComboBoxString> SolverCombo;
+
 	// Visualization block (M3).
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
 	TObjectPtr<UCheckBox> PathsCheck;
@@ -149,6 +157,25 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> VisualizationText;
+
+	// Image sources and beams (M5).
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UCheckBox> ImagesCheck;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UCheckBox> ImagesOnlyValidCheck;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UCheckBox> BeamsCheck;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UCheckBox> BeamsContainingCheck;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<USlider> BeamOrderSlider;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> BeamOrderText;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
 	TObjectPtr<UIRPlotWidget> IRPlot;
@@ -174,6 +201,9 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
 	TObjectPtr<UButton> RayButton;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UButton> BeamButton;
 
 private:
 	void BuildDefaultTree();
@@ -229,7 +259,31 @@ private:
 	UFUNCTION()
 	void HandleRayClicked();
 
+	UFUNCTION()
+	void HandleBeamClicked();
+
+	UFUNCTION()
+	void HandleSolverChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	UFUNCTION()
+	void HandleImagesChanged(bool bChecked);
+
+	UFUNCTION()
+	void HandleImagesOnlyValidChanged(bool bChecked);
+
+	UFUNCTION()
+	void HandleBeamsChanged(bool bChecked);
+
+	UFUNCTION()
+	void HandleBeamsContainingChanged(bool bChecked);
+
+	UFUNCTION()
+	void HandleBeamOrderChanged(float Value);
+
 	void HandleFieldCommitted(FName FieldId, const FText& Text);
+	UImageSourceVisualizerComponent* GetImageSourceVisualizer() const;
+	UBeamVisualizerComponent* GetBeamVisualizer() const;
+	static TArray<EAcousticSolver> SolverOptions();
 	void HandleResultReady(AAcousticSimulationManager* InManager, const FSimulationResult& Result);
 	void SelectVariant(int32 Key);
 	UAuralizationComponent* GetAuralization() const;
@@ -240,6 +294,7 @@ private:
 	void RefreshReference();
 	void RefreshPlot();
 	void RefreshAuralization();
+	void RefreshTitle();
 	void RefreshVisualization();
 	TArray<AReceiverGrid*> FindGrids() const;
 

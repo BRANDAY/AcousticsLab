@@ -249,10 +249,20 @@ FSynthesizedIR FIRSynthesizer::Synthesize(const FEnergyHistogram& Histogram, TCo
 
 FSynthesizedIR FIRSynthesizer::SynthesizeForReceiver(const FReceiverResult& Receiver, const FIRSynthesisSettings& Settings, int32 Band)
 {
-	TArray<FIRImpulse, TInlineAllocator<1>> Impulses;
+	TArray<FIRImpulse> Impulses;
+	Impulses.Reserve(1 + Receiver.EarlyReflections.Num());
 	if (!Receiver.bDirectOccluded && Receiver.DirectEnergy > 0.0)
 	{
 		Impulses.Emplace(Receiver.DirectArrivalSeconds, Receiver.DirectEnergy);
+	}
+	// Early reflections of the image-source and beam solvers are exact impulses too (SPEC §2.9); the solver already
+	// deposited their energy in the histogram, Synthesize removes it from the noise of their bins.
+	for (const FEarlyReflection& Reflection : Receiver.EarlyReflections)
+	{
+		if (Reflection.Order > 0 && Reflection.Energy[Band] > 0.0)
+		{
+			Impulses.Emplace(Reflection.TimeSeconds, Reflection.Energy[Band]);
+		}
 	}
 	return Synthesize(Receiver.Histogram, Impulses, Settings, Band);
 }

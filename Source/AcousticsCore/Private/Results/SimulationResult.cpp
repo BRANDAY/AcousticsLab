@@ -10,6 +10,14 @@ const FReceiverResult* FSimulationResult::FindReceiver(const FString& Name) cons
 	return Receivers.FindByPredicate([&Name](const FReceiverResult& Receiver) { return Receiver.Name == Name; });
 }
 
+FEarlyReflection::FEarlyReflection()
+{
+	for (double& Value : Energy)
+	{
+		Value = 0.0;
+	}
+}
+
 FString FSimulationResult::Describe() const
 {
 	if (!bSuccess)

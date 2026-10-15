@@ -13,7 +13,7 @@ class USoundSubmix;
 class USubmixEffectConvolutionReverbPreset;
 struct FSimulationResult;
 
-/** A/B variants of SPEC §3.7, numbered like the keys 1-6. Only Dry and Ray have a signal path in M4. */
+/** A/B variants of SPEC §3.7, numbered like the keys 1-6. Dry, Ray (M4) and Beam (M5) have a signal path. */
 UENUM(BlueprintType)
 enum class EAuralizationVariant : uint8
 {
@@ -67,14 +67,25 @@ struct FAuralizationReceiverInfo
 	FString WavPath;
 };
 
+/** Responses synthesized from one solver result; one set per variant with a solver (Ray = ray tracer, Beam = beam tracer). */
+struct FAuralizationVariantSet
+{
+	TMap<int32, FSynthesizedIR> ImpulseResponses;
+	TArray<FAuralizationReceiverInfo> Infos;
+	TSharedPtr<const FSimulationResult> Result;
+	FString SolverName;
+};
+
 /**
  * Lives on AAcousticSimulationManager. After every successful run it synthesizes the impulse response of every point
  * receiver (FIRSynthesizer), writes Saved/IR/<Level>_<Solver>_<ReceiverId>.wav and hands the response of the selected
  * receiver to the convolution reverb: a transient UAudioImpulseResponse (mono, 48 kHz) assigned with
  * USubmixEffectConvolutionReverbPreset::SetImpulseResponse on the preset of the SM_Auralization submix. Switching the
- * receiver swaps the cached response without touching the solver. The A/B variants drive the wet / dry levels of the
- * submix (USoundSubmix::SetSubmixWetLevel / SetSubmixDryLevel): Dry = the clip as recorded, Ray = the convolved clip;
- * the convolution keeps running, so the switch is instantaneous and click-free. The clip plays 2D through an audio
+ * receiver swaps the cached response without touching the solver. Results are kept per variant (Ray from the ray
+ * tracer, Beam from the beam tracer, M5), so keys 2 / 3 swap the assigned response set. The A/B variants drive the wet /
+ * dry levels of the submix (USoundSubmix::SetSubmixWetLevel / SetSubmixDryLevel): Dry = the clip as recorded, Ray / Beam
+ * = the convolved clip; the convolution keeps running, so Dry <-> wet is instantaneous and click-free (Ray <-> Beam
+ * rebuilds the convolution with the other response). The clip plays 2D through an audio
  * component: the response already contains the direct sound and the distance attenuation of the receiver.
  */
 UCLASS(ClassGroup = (Acoustics), meta = (BlueprintSpawnableComponent))
@@ -138,6 +149,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Acoustics|State")
 	EAuralizationVariant Variant = EAuralizationVariant::Dry;
 
+	/** Variant whose response set is assigned to the convolution (Ray or Beam), None before the first result. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Acoustics|State")
+	EAuralizationVariant IRVariant = EAuralizationVariant::None;
+
 	/** Index into the result's receivers whose response is assigned (or wanted for the next result). */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Acoustics|State")
 	int32 SelectedReceiver = INDEX_NONE;
@@ -164,9 +179,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Acoustics|Auralization")
 	void SetVariant(EAuralizationVariant NewVariant);
 
-	/** Key 1 = Dry, 2 = Ray; 3-6 have no solver yet and leave the routing alone (false). */
+	/** Key 1 = Dry, 2 = Ray, 3 = Beam (each needs a result of its solver); 4-6 have no solver yet and leave the routing alone (false). */
 	UFUNCTION(BlueprintCallable, Category = "Acoustics|Auralization")
 	bool SetVariantByKey(int32 Key);
+
+	/** A result of the variant's solver has been synthesized. */
+	UFUNCTION(BlueprintPure, Category = "Acoustics|Auralization")
+	bool HasVariantResult(EAuralizationVariant InVariant) const { return VariantSets.Contains(InVariant); }
+
+	/** Variant a solver result feeds: RayTracer -> Ray, BeamTracer -> Beam, others -> None (not auralized). */
+	static EAuralizationVariant VariantForSolver(const FString& InSolverName);
 
 	UFUNCTION(BlueprintCallable, Category = "Acoustics|Auralization")
 	void Play();
@@ -190,8 +212,9 @@ public:
 	FString DescribeState() const;
 
 	const FAuralizationReceiverInfo* FindInfo(int32 ReceiverIndex) const;
-	const FSynthesizedIR* FindImpulseResponse(int32 ReceiverIndex) const { return ImpulseResponses.Find(ReceiverIndex); }
-	int32 NumImpulseResponses() const { return ImpulseResponses.Num(); }
+	const FSynthesizedIR* FindImpulseResponse(int32 ReceiverIndex) const;
+	int32 NumImpulseResponses() const;
+	const FAuralizationVariantSet* FindVariantSet(EAuralizationVariant InVariant) const { return VariantSets.Find(InVariant); }
 
 	FIRSynthesisSettings MakeSynthesisSettings() const;
 
@@ -212,6 +235,8 @@ private:
 	bool EnsureRouting();
 	UAudioComponent* EnsureAudioComponent();
 	bool AssignImpulseResponse(int32 ReceiverIndex);
+	bool ActivateVariantSet(EAuralizationVariant InVariant);
+	const FAuralizationVariantSet* ActiveSet() const { return VariantSets.Find(IRVariant); }
 	void ApplyVariantRouting();
 	void RestartClip();
 
@@ -230,7 +255,7 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UAudioImpulseResponse> CurrentIR;
 
-	TMap<int32, FSynthesizedIR> ImpulseResponses;
+	TMap<EAuralizationVariant, FAuralizationVariantSet> VariantSets;
 	TSharedPtr<const FSimulationResult> CurrentResult;
 
 	/** Result the assigned response was synthesized from. */

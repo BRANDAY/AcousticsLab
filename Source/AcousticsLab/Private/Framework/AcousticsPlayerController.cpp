@@ -263,7 +263,7 @@ void AAcousticsPlayerController::OnSelectVariant(const FInputActionValue& Value,
 	UAuralizationComponent* Auralization = Manager ? Manager->Auralization.Get() : nullptr;
 	const bool bRouted = Auralization && Auralization->SetVariantByKey(Variant);
 	UE_LOG(LogAcoustics, Log, TEXT("A/B variant %d (%s) selected%s"), Variant, *UAuralizationComponent::VariantName(UAuralizationComponent::VariantFromKey(Variant)),
-		bRouted ? TEXT("") : (Auralization ? TEXT(": no signal path for it yet") : TEXT(": no simulation manager in this level")));
+		bRouted ? TEXT("") : (Auralization ? TEXT(": no result or signal path for it yet") : TEXT(": no simulation manager in this level")));
 	if (bRouted && !Auralization->IsPlaying() && Auralization->HasImpulseResponse())
 	{
 		Auralization->Play();

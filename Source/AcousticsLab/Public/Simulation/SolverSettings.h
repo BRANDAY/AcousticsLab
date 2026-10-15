@@ -4,9 +4,11 @@
 #include "CoreMinimal.h"
 #include "SolverSettings.generated.h"
 
+struct FBeamTracerSettings;
+struct FImageSourceSettings;
 struct FRayTracerSettings;
 
-/** Which solver a run uses. Only the ray tracer exists in M2; the others arrive with M5 / M8. */
+/** Which solver a run uses. Ray tracer (M2), image sources and beam tracer (M5); the hybrid arrives with M8. */
 UENUM(BlueprintType)
 enum class EAcousticSolver : uint8
 {
@@ -18,8 +20,8 @@ enum class EAcousticSolver : uint8
 
 /**
  * One struct for every solver so the HUD, the manager and the subsystem carry the same settings.
- * Ray-tracer fields map to FRayTracerSettings through ToRayTracerSettings(); beam / hybrid / refraction
- * fields are stored now and used from M5 on.
+ * Ray-tracer fields map to FRayTracerSettings through ToRayTracerSettings(), the image-source and beam fields to
+ * FImageSourceSettings / FBeamTracerSettings (M5); hybrid / refraction fields are stored now and used from M6 / M8 on.
  */
 USTRUCT(BlueprintType)
 struct ACOUSTICSLAB_API FSolverSettings
@@ -74,6 +76,18 @@ struct ACOUSTICSLAB_API FSolverSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Beams", meta = (ClampMin = "0", ClampMax = "10"))
 	int32 MaxBeamOrder = 3;
 
+	/** Node budget of the beam tree (every node holds about 400 bytes). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Beams", meta = (ClampMin = "1000", ClampMax = "5000000"))
+	int32 MaxBeamNodes = 500000;
+
+	/** Highest image-source order (SPEC §2.4: <= 3, the count grows exponentially with the number of surfaces). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Image sources", meta = (ClampMin = "0", ClampMax = "6"))
+	int32 ImageSourceOrder = 3;
+
+	/** Image budget of the image-source solver. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Image sources", meta = (ClampMin = "100", ClampMax = "5000000"))
+	int32 MaxImageSources = 200000;
+
 	/** Beam order up to which the hybrid tracer uses beams (M8). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hybrid", meta = (ClampMin = "0", ClampMax = "10"))
 	int32 HybridK = 2;
@@ -82,5 +96,9 @@ struct ACOUSTICSLAB_API FSolverSettings
 	bool bRefraction = false;
 
 	FRayTracerSettings ToRayTracerSettings() const;
-	FString ToString() const;
+	FImageSourceSettings ToImageSourceSettings() const;
+	FBeamTracerSettings ToBeamTracerSettings() const;
+
+	/** Summary of the fields the given solver uses. */
+	FString ToString(EAcousticSolver Solver = EAcousticSolver::RayTracer) const;
 };

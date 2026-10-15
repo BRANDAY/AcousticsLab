@@ -31,7 +31,7 @@ namespace
 	// Console commands for scripted checks and for the owner: Acoustics.Auralization.Variant 1|2, .Receiver R3|<index>, .Play, .Stop.
 	FAutoConsoleCommandWithWorldAndArgs GAuralizationVariantCommand(
 		TEXT("Acoustics.Auralization.Variant"),
-		TEXT("A/B variant of the auralization: 1 = Dry, 2 = Ray (convolution)."),
+		TEXT("A/B variant of the auralization: 1 = Dry, 2 = Ray, 3 = Beam (convolution with the response of that solver)."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
 		{
 			UAuralizationComponent* Auralization = FindAuralization(World, TEXT("Acoustics.Auralization.Variant"));
@@ -148,7 +148,9 @@ void UAuralizationComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		Submix->SetSubmixDryLevel(this, 0.0f);
 	}
 	CurrentIR = nullptr;
-	ImpulseResponses.Empty();
+	VariantSets.Empty();
+	ReceiverInfos.Reset();
+	IRVariant = EAuralizationVariant::None;
 	CurrentResult.Reset();
 	AssignedResultKey = nullptr;
 	Super::EndPlay(EndPlayReason);
@@ -160,7 +162,7 @@ FString UAuralizationComponent::VariantName(EAuralizationVariant InVariant)
 	{
 	case EAuralizationVariant::Dry: return TEXT("Dry");
 	case EAuralizationVariant::Ray: return TEXT("Ray");
-	case EAuralizationVariant::Beam: return TEXT("Beam (M5)");
+	case EAuralizationVariant::Beam: return TEXT("Beam");
 	case EAuralizationVariant::Hybrid: return TEXT("Hybrid (M8)");
 	case EAuralizationVariant::SteamAudio: return TEXT("Steam Audio (M9)");
 	case EAuralizationVariant::AudioTracing: return TEXT("Audio Tracing (M9)");
@@ -171,6 +173,35 @@ FString UAuralizationComponent::VariantName(EAuralizationVariant InVariant)
 EAuralizationVariant UAuralizationComponent::VariantFromKey(int32 Key)
 {
 	return Key >= 1 && Key <= 6 ? static_cast<EAuralizationVariant>(Key) : EAuralizationVariant::None;
+}
+
+EAuralizationVariant UAuralizationComponent::VariantForSolver(const FString& InSolverName)
+{
+	if (InSolverName.Equals(TEXT("RayTracer"), ESearchCase::IgnoreCase))
+	{
+		return EAuralizationVariant::Ray;
+	}
+	if (InSolverName.Equals(TEXT("BeamTracer"), ESearchCase::IgnoreCase))
+	{
+		return EAuralizationVariant::Beam;
+	}
+	if (InSolverName.StartsWith(TEXT("Hybrid"), ESearchCase::IgnoreCase))
+	{
+		return EAuralizationVariant::Hybrid;
+	}
+	return EAuralizationVariant::None;
+}
+
+const FSynthesizedIR* UAuralizationComponent::FindImpulseResponse(int32 ReceiverIndex) const
+{
+	const FAuralizationVariantSet* Set = ActiveSet();
+	return Set ? Set->ImpulseResponses.Find(ReceiverIndex) : nullptr;
+}
+
+int32 UAuralizationComponent::NumImpulseResponses() const
+{
+	const FAuralizationVariantSet* Set = ActiveSet();
+	return Set ? Set->ImpulseResponses.Num() : 0;
 }
 
 FString UAuralizationComponent::MakeExportPath(const FString& InLevelName, const FString& InSolverName, const FString& ReceiverId)
@@ -288,18 +319,23 @@ UAudioComponent* UAuralizationComponent::EnsureAudioComponent()
 
 void UAuralizationComponent::SetResult(const TSharedPtr<const FSimulationResult>& Result, const TArray<int32>& PointReceiverIndices, const FString& InLevelName, const FString& InSolverName)
 {
-	ImpulseResponses.Empty();
-	ReceiverInfos.Reset();
-	CurrentResult = Result;
-	AssignedResultKey = nullptr;
 	LevelName = InLevelName;
-	SolverName = InSolverName;
 	if (!Result.IsValid() || !Result->bSuccess)
 	{
 		StatusMessage = TEXT("no result to auralize");
 		return;
 	}
+	const EAuralizationVariant ResultVariant = VariantForSolver(InSolverName);
+	if (ResultVariant == EAuralizationVariant::None || ResultVariant == EAuralizationVariant::Hybrid)
+	{
+		StatusMessage = FString::Printf(TEXT("%s results have no A/B variant (keys: 2 Ray, 3 Beam)"), *InSolverName);
+		UE_LOG(LogAcoustics, Log, TEXT("Auralization: %s; the assigned response (%s) is kept"), *StatusMessage, *VariantName(IRVariant));
+		return;
+	}
 
+	FAuralizationVariantSet Set;
+	Set.Result = Result;
+	Set.SolverName = InSolverName;
 	const FIRSynthesisSettings Settings = MakeSynthesisSettings();
 	const double Start = FPlatformTime::Seconds();
 	for (const int32 Index : PointReceiverIndices)
@@ -310,7 +346,7 @@ void UAuralizationComponent::SetResult(const TSharedPtr<const FSimulationResult>
 		}
 		const FReceiverResult& Receiver = Result->Receivers[Index];
 		FSynthesizedIR IR = FIRSynthesizer::SynthesizeForReceiver(Receiver, Settings);
-		FAuralizationReceiverInfo& Info = ReceiverInfos.AddDefaulted_GetRef();
+		FAuralizationReceiverInfo& Info = Set.Infos.AddDefaulted_GetRef();
 		Info.ReceiverIndex = Index;
 		Info.ReceiverName = Receiver.Name;
 		Info.NumSamples = IR.Samples.Num();
@@ -325,7 +361,7 @@ void UAuralizationComponent::SetResult(const TSharedPtr<const FSimulationResult>
 		}
 		if (bExportWav)
 		{
-			const FString Path = MakeExportPath(LevelName, SolverName, Receiver.Name);
+			const FString Path = MakeExportPath(LevelName, InSolverName, Receiver.Name);
 			FString Error;
 			const EWavSampleFormat Format = ExportFormat == EIRExportFormat::PCM16 ? EWavSampleFormat::PCM16 : EWavSampleFormat::Float32;
 			if (FWavFile::Write(Path, IR.Samples, IR.SampleRate, 1, Format, &Error))
@@ -342,20 +378,50 @@ void UAuralizationComponent::SetResult(const TSharedPtr<const FSimulationResult>
 		{
 			UE_LOG(LogAcoustics, Log, TEXT("Auralization: %s: %s"), *Receiver.Name, *IR.Describe());
 		}
-		ImpulseResponses.Add(Index, MoveTemp(IR));
+		Set.ImpulseResponses.Add(Index, MoveTemp(IR));
 	}
-	UE_LOG(LogAcoustics, Log, TEXT("Auralization: %d impulse responses for %s / %s synthesized in %.1f ms"), ImpulseResponses.Num(), *LevelName, *SolverName, (FPlatformTime::Seconds() - Start) * 1000.0);
+	UE_LOG(LogAcoustics, Log, TEXT("Auralization: %d impulse responses for %s / %s (variant %s) synthesized in %.1f ms"), Set.ImpulseResponses.Num(), *LevelName, *InSolverName, *VariantName(ResultVariant), (FPlatformTime::Seconds() - Start) * 1000.0);
+	VariantSets.Add(ResultVariant, MoveTemp(Set));
+
+	// The newest result is heard: its set becomes the assigned one, and a wet variant follows the solver that just ran.
+	if (!ActivateVariantSet(ResultVariant))
+	{
+		return;
+	}
+	if (Variant != EAuralizationVariant::Dry && Variant != ResultVariant)
+	{
+		Variant = ResultVariant;
+		ApplyVariantRouting();
+	}
+	if (bAutoPlayOnResult && !IsPlaying())
+	{
+		Play();
+	}
+}
+
+bool UAuralizationComponent::ActivateVariantSet(EAuralizationVariant InVariant)
+{
+	const FAuralizationVariantSet* Set = VariantSets.Find(InVariant);
+	if (!Set)
+	{
+		return false;
+	}
+	IRVariant = InVariant;
+	ReceiverInfos = Set->Infos;
+	SolverName = Set->SolverName;
+	CurrentResult = Set->Result;
+	AssignedResultKey = nullptr;
 
 	int32 Target = INDEX_NONE;
-	if (ImpulseResponses.Contains(SelectedReceiver))
+	if (Set->ImpulseResponses.Contains(SelectedReceiver))
 	{
 		Target = SelectedReceiver;
 	}
 	else
 	{
-		for (const FAuralizationReceiverInfo& Info : ReceiverInfos)
+		for (const FAuralizationReceiverInfo& Info : Set->Infos)
 		{
-			if (ImpulseResponses.Contains(Info.ReceiverIndex))
+			if (Set->ImpulseResponses.Contains(Info.ReceiverIndex))
 			{
 				Target = Info.ReceiverIndex;
 				break;
@@ -365,18 +431,15 @@ void UAuralizationComponent::SetResult(const TSharedPtr<const FSimulationResult>
 	if (Target == INDEX_NONE)
 	{
 		StatusMessage = TEXT("no receiver with energy");
-		return;
+		return false;
 	}
-	AssignImpulseResponse(Target);
-	if (bAutoPlayOnResult && !IsPlaying())
-	{
-		Play();
-	}
+	return AssignImpulseResponse(Target);
 }
 
 bool UAuralizationComponent::SelectReceiver(int32 ResultReceiverIndex)
 {
-	if (!ImpulseResponses.Contains(ResultReceiverIndex))
+	const FAuralizationVariantSet* Set = ActiveSet();
+	if (!Set || !Set->ImpulseResponses.Contains(ResultReceiverIndex))
 	{
 		SelectedReceiver = ResultReceiverIndex; // used when the next result arrives
 		return false;
@@ -390,7 +453,7 @@ bool UAuralizationComponent::SelectReceiver(int32 ResultReceiverIndex)
 
 bool UAuralizationComponent::AssignImpulseResponse(int32 ReceiverIndex)
 {
-	const FSynthesizedIR* IR = ImpulseResponses.Find(ReceiverIndex);
+	const FSynthesizedIR* IR = FindImpulseResponse(ReceiverIndex);
 	SelectedReceiver = ReceiverIndex;
 	if (!IR || !IR->IsValid())
 	{
@@ -425,8 +488,8 @@ bool UAuralizationComponent::AssignImpulseResponse(int32 ReceiverIndex)
 				ChainIndex = Index;
 			}
 		}
-		UE_LOG(LogAcoustics, Log, TEXT("Auralization: IR of %s assigned to preset %s (submix %s, effect %d of %d): %d samples at %d Hz = %.3f s (cut by %s), peak %.2f dBFS, normalization %.1f dB; variant %s"),
-			*ReceiverName, *Preset->GetName(), *Submix->GetName(), ChainIndex, Submix->SubmixEffectChain.Num(),
+		UE_LOG(LogAcoustics, Log, TEXT("Auralization: IR of %s (%s) assigned to preset %s (submix %s, effect %d of %d): %d samples at %d Hz = %.3f s (cut by %s), peak %.2f dBFS, normalization %.1f dB; variant %s"),
+			*ReceiverName, *SolverName, *Preset->GetName(), *Submix->GetName(), ChainIndex, Submix->SubmixEffectChain.Num(),
 			NewIR->ImpulseResponse.Num(), NewIR->SampleRate, IR->DurationSeconds(), IR->bTruncatedByLevel ? TEXT("level") : TEXT("length"),
 			IR->PeakDbFS(), NewIR->NormalizationVolumeDb, *VariantName(Variant));
 	}
@@ -442,8 +505,24 @@ void UAuralizationComponent::SetVariant(EAuralizationVariant NewVariant)
 bool UAuralizationComponent::SetVariantByKey(int32 Key)
 {
 	const EAuralizationVariant Requested = VariantFromKey(Key);
-	if (Requested == EAuralizationVariant::Dry || Requested == EAuralizationVariant::Ray)
+	if (Requested == EAuralizationVariant::Dry)
 	{
+		SetVariant(Requested);
+		return true;
+	}
+	if (Requested == EAuralizationVariant::Ray || Requested == EAuralizationVariant::Beam)
+	{
+		if (!VariantSets.Contains(Requested))
+		{
+			UE_LOG(LogAcoustics, Log, TEXT("Auralization: variant %d (%s) has no result yet; run the %s first (routing stays %s)"), Key, *VariantName(Requested),
+				Requested == EAuralizationVariant::Ray ? TEXT("ray tracer") : TEXT("beam tracer"), *VariantName(Variant));
+			StatusMessage = FString::Printf(TEXT("no %s result yet"), *VariantName(Requested));
+			return false;
+		}
+		if (IRVariant != Requested)
+		{
+			ActivateVariantSet(Requested); // swaps the response set of the selected receiver
+		}
 		SetVariant(Requested);
 		return true;
 	}
@@ -458,7 +537,7 @@ void UAuralizationComponent::ApplyVariantRouting()
 		return;
 	}
 	// Wet = output of the effect chain (the convolution), dry = the submix input as it came in.
-	const bool bWet = Variant == EAuralizationVariant::Ray;
+	const bool bWet = Variant == EAuralizationVariant::Ray || Variant == EAuralizationVariant::Beam;
 	const float WetLevel = bWet ? 1.0f : 0.0f;
 	const float DryLevel = bWet ? 0.0f : 1.0f;
 	Submix->SetSubmixWetLevel(this, WetLevel);
@@ -533,8 +612,17 @@ void UAuralizationComponent::RestartClip()
 FString UAuralizationComponent::DescribeState() const
 {
 	const FAuralizationReceiverInfo* Info = FindInfo(SelectedReceiver);
-	FString Text = FString::Printf(TEXT("Variant: %s   Receiver: %s   Clip: %s"), *VariantName(Variant), Info ? *Info->ReceiverName : TEXT("-"),
-		IsPlaying() ? TEXT("playing") : (AudioComponent ? TEXT("stopped") : TEXT("not started")));
+	FString Cached;
+	for (const EAuralizationVariant Candidate : { EAuralizationVariant::Ray, EAuralizationVariant::Beam })
+	{
+		if (VariantSets.Contains(Candidate))
+		{
+			Cached += (Cached.IsEmpty() ? TEXT("") : TEXT(", ")) + VariantName(Candidate);
+		}
+	}
+	FString Text = FString::Printf(TEXT("Variant: %s   Receiver: %s   Clip: %s\nResponses: %s (assigned: %s)"), *VariantName(Variant), Info ? *Info->ReceiverName : TEXT("-"),
+		IsPlaying() ? TEXT("playing") : (AudioComponent ? TEXT("stopped") : TEXT("not started")), Cached.IsEmpty() ? TEXT("none yet") : *Cached,
+		IRVariant == EAuralizationVariant::None ? TEXT("-") : *SolverName);
 	if (!bRoutingReady)
 	{
 		Text += TEXT("\n") + (StatusMessage.IsEmpty() ? FString(TEXT("Routing: submix / preset not loaded")) : StatusMessage);

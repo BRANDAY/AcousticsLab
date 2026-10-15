@@ -15,7 +15,11 @@
 #include "Scene/AcousticSource.h"
 #include "Scene/ReceiverGrid.h"
 #include "Simulation/AcousticSimulationSubsystem.h"
+#include "Solvers/BeamTracer.h"
+#include "Solvers/ImageSourceSolver.h"
 #include "Solvers/RayTracer.h"
+#include "Visualization/BeamVisualizerComponent.h"
+#include "Visualization/ImageSourceVisualizerComponent.h"
 #include "Visualization/RayPathVisualizerComponent.h"
 
 AAcousticSimulationManager::AAcousticSimulationManager()
@@ -25,6 +29,13 @@ AAcousticSimulationManager::AAcousticSimulationManager()
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	PathVisualizer = CreateDefaultSubobject<URayPathVisualizerComponent>(TEXT("PathVisualizer"));
 	Auralization = CreateDefaultSubobject<UAuralizationComponent>(TEXT("Auralization"));
+	ImageSourceVisualizer = CreateDefaultSubobject<UImageSourceVisualizerComponent>(TEXT("ImageSourceVisualizer"));
+	BeamVisualizer = CreateDefaultSubobject<UBeamVisualizerComponent>(TEXT("BeamVisualizer"));
+}
+
+EAcousticSolver AAcousticSimulationManager::GetEffectiveSolver() const
+{
+	return Solver == EAcousticSolver::Hybrid ? EAcousticSolver::RayTracer : Solver;
 }
 
 void AAcousticSimulationManager::BeginPlay()
@@ -182,6 +193,14 @@ void AAcousticSimulationManager::UpdateVisualizers()
 	{
 		PathVisualizer->SetResult(LastResult);
 	}
+	if (ImageSourceVisualizer)
+	{
+		ImageSourceVisualizer->SetResult(LastResult);
+	}
+	if (BeamVisualizer)
+	{
+		BeamVisualizer->SetResult(LastResult);
+	}
 	const bool bHaveResult = LastResult.IsValid() && LastResult->bSuccess && ReceiverBindings.Num() == LastResult->Receivers.Num();
 	for (AReceiverGrid* Grid : AReceiverGrid::FindAll(GetWorld()))
 	{
@@ -309,13 +328,23 @@ bool AAcousticSimulationManager::Run()
 	PendingBindings = MoveTemp(Bindings);
 
 	FString SolverNote;
-	if (Solver != EAcousticSolver::RayTracer)
+	const EAcousticSolver Effective = GetEffectiveSolver();
+	if (Effective != Solver)
 	{
 		SolverNote = FString::Printf(TEXT(" (%s not available yet, using the ray tracer)"), *UAcousticSimulationSubsystem::SolverName(Solver));
 	}
 
 	const FRayTracerSettings RayTracerSettings = Settings.ToRayTracerSettings();
-	if (!RayTracerSettings.Validate(Error))
+	const FImageSourceSettings ImageSourceSettings = Settings.ToImageSourceSettings();
+	const FBeamTracerSettings BeamTracerSettings = Settings.ToBeamTracerSettings();
+	bool bValid = true;
+	switch (Effective)
+	{
+	case EAcousticSolver::ImageSource: bValid = ImageSourceSettings.Validate(Error); break;
+	case EAcousticSolver::BeamTracer: bValid = BeamTracerSettings.Validate(Error); break;
+	default: bValid = RayTracerSettings.Validate(Error); break;
+	}
+	if (!bValid)
 	{
 		SetState(ESimulationState::Failed, Error);
 		return false;
@@ -329,9 +358,20 @@ bool AAcousticSimulationManager::Run()
 	TSharedPtr<FSolverProgress> Progress_ = ProgressState;
 	TSharedPtr<FSimulationResult> Result = PendingResult;
 	Task = UE::Tasks::Launch(UE_SOURCE_LOCATION,
-		[Scene, Source, Receivers = MoveTemp(Receivers), RayTracerSettings, Progress_, Result]()
+		[Scene, Source, Receivers = MoveTemp(Receivers), Effective, RayTracerSettings, ImageSourceSettings, BeamTracerSettings, Progress_, Result]()
 		{
-			*Result = FRayTracer::Run(*Scene, Source, Receivers, RayTracerSettings, Progress_.Get());
+			switch (Effective)
+			{
+			case EAcousticSolver::ImageSource:
+				*Result = FImageSourceSolver::Run(*Scene, Source, Receivers, ImageSourceSettings, Progress_.Get());
+				break;
+			case EAcousticSolver::BeamTracer:
+				*Result = FBeamTracer::Run(*Scene, Source, Receivers, BeamTracerSettings, Progress_.Get());
+				break;
+			default:
+				*Result = FRayTracer::Run(*Scene, Source, Receivers, RayTracerSettings, Progress_.Get());
+				break;
+			}
 		});
 
 	if (UAcousticSimulationSubsystem* Subsystem = UAcousticSimulationSubsystem::Get(this))
@@ -343,8 +383,15 @@ bool AAcousticSimulationManager::Run()
 	{
 		NumGridReceivers += Binding.Kind == EReceiverBindingKind::GridTile ? 1 : 0;
 	}
-	UE_LOG(LogAcoustics, Log, TEXT("Simulation run %d started: %s; %d receivers (%d grid tiles); scene %s"), RunCount, *Settings.ToString(), PendingBindings.Num(), NumGridReceivers, *Scene->DescribeStats());
-	SetState(ESimulationState::Running, FString::Printf(TEXT("Tracing %d rays...%s"), Settings.NumRays, *SolverNote));
+	UE_LOG(LogAcoustics, Log, TEXT("Simulation run %d started (%s): %s; %d receivers (%d grid tiles); scene %s"), RunCount, *UAcousticSimulationSubsystem::SolverName(Effective), *Settings.ToString(Effective), PendingBindings.Num(), NumGridReceivers, *Scene->DescribeStats());
+	FString Activity;
+	switch (Effective)
+	{
+	case EAcousticSolver::ImageSource: Activity = FString::Printf(TEXT("Image sources up to order %d..."), Settings.ImageSourceOrder); break;
+	case EAcousticSolver::BeamTracer: Activity = FString::Printf(TEXT("Tracing %d beams up to order %d..."), FBeamTracerSettings::NumRootBeams(Settings.SubdivisionLevel), Settings.MaxBeamOrder); break;
+	default: Activity = FString::Printf(TEXT("Tracing %d rays..."), Settings.NumRays); break;
+	}
+	SetState(ESimulationState::Running, Activity + SolverNote);
 	return true;
 }
 

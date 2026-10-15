@@ -12,6 +12,8 @@
 struct FAcousticScene;
 class AReceiverGrid;
 class UAuralizationComponent;
+class UBeamVisualizerComponent;
+class UImageSourceVisualizerComponent;
 class URayPathVisualizerComponent;
 
 /** What a receiver of the result corresponds to in the level. */
@@ -74,7 +76,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Acoustics")
 	FSolverSettings Settings;
 
-	/** Only the ray tracer runs in M2; other choices fall back to it with a note in StatusMessage. */
+	/** Ray tracer, image sources or beam tracer (M5); the hybrid falls back to the ray tracer with a note in StatusMessage until M8. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Acoustics")
 	EAcousticSolver Solver = EAcousticSolver::RayTracer;
 
@@ -100,6 +102,14 @@ public:
 	/** Impulse responses, WAV export and convolution reverb of the last result (M4). */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Acoustics")
 	TObjectPtr<UAuralizationComponent> Auralization;
+
+	/** Image-source spheres and specular paths of the last result (M5). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Acoustics")
+	TObjectPtr<UImageSourceVisualizerComponent> ImageSourceVisualizer;
+
+	/** Beam frustums of the last beam-tracer result (M5). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Acoustics")
+	TObjectPtr<UBeamVisualizerComponent> BeamVisualizer;
 
 	/** One entry per receiver of the last result: point receiver actor or grid tile. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Acoustics|State")
@@ -178,8 +188,11 @@ public:
 	/** Indices into the last result's receivers that are point receivers (every receiver when the bindings are unknown). */
 	TArray<int32> GetPointReceiverIndices() const;
 
-	/** Pushes the last result to the path visualizer and to every receiver grid of the level. */
+	/** Pushes the last result to the path / image-source / beam visualizers and to every receiver grid of the level. */
 	void UpdateVisualizers();
+
+	/** Solver that actually runs for the current Solver choice (the hybrid falls back to the ray tracer until M8). */
+	EAcousticSolver GetEffectiveSolver() const;
 
 	/** Extracts the acoustic geometry of the world (meters, BVH built) and applies WallAbsorptionOverride. */
 	bool ExtractScene(FAcousticScene& OutScene, FString& OutError);

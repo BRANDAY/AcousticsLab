@@ -14,6 +14,7 @@
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/ProgressBar.h"
 #include "Components/SizeBox.h"
+#include "Components/Slider.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -21,10 +22,13 @@
 #include "Results/SimulationResult.h"
 #include "Scene/ReceiverGrid.h"
 #include "Simulation/AcousticSimulationManager.h"
+#include "Simulation/AcousticSimulationSubsystem.h"
 #include "Styling/CoreStyle.h"
 #include "UI/HeatmapLegendWidget.h"
 #include "UI/IRPlotWidget.h"
+#include "Visualization/BeamVisualizerComponent.h"
 #include "Visualization/HeatmapComponent.h"
+#include "Visualization/ImageSourceVisualizerComponent.h"
 #include "Visualization/RayPathVisualizerComponent.h"
 
 #define LOCTEXT_NAMESPACE "AcousticsSimulationHUD"
@@ -41,6 +45,9 @@ namespace
 	const FName FieldNumThreads(TEXT("NumThreads"));
 	const FName FieldWallAlpha(TEXT("WallAlpha"));
 	const FName FieldDrawOrder(TEXT("DrawOrder"));
+	const FName FieldImageOrder(TEXT("ImageOrder"));
+	const FName FieldBeamSubdiv(TEXT("BeamSubdiv"));
+	const FName FieldBeamOrder(TEXT("BeamOrder"));
 
 	const FLinearColor PanelColor(0.02f, 0.025f, 0.035f, 0.85f);
 	const FLinearColor LabelColor(0.75f, 0.75f, 0.8f);
@@ -76,7 +83,7 @@ USimulationHUDWidget::USimulationHUDWidget(const FObjectInitializer& ObjectIniti
 
 TArray<FName> USimulationHUDWidget::SettingFieldIds()
 {
-	return { FieldNumRays, FieldMaxOrder, FieldSeed, FieldReceiverRadius, FieldBinMs, FieldTMax, FieldAirAbsorption, FieldNumThreads, FieldWallAlpha, FieldDrawOrder };
+	return { FieldNumRays, FieldMaxOrder, FieldSeed, FieldReceiverRadius, FieldBinMs, FieldTMax, FieldAirAbsorption, FieldNumThreads, FieldWallAlpha, FieldDrawOrder, FieldImageOrder, FieldBeamSubdiv, FieldBeamOrder };
 }
 
 void USimulationHUDWidget::SetManager(AAcousticSimulationManager* InManager)
@@ -174,6 +181,41 @@ void USimulationHUDWidget::NativeConstruct()
 	{
 		RayButton->OnClicked.AddUniqueDynamic(this, &USimulationHUDWidget::HandleRayClicked);
 	}
+	if (BeamButton)
+	{
+		BeamButton->OnClicked.AddUniqueDynamic(this, &USimulationHUDWidget::HandleBeamClicked);
+	}
+	if (SolverCombo)
+	{
+		if (SolverCombo->GetOptionCount() == 0)
+		{
+			for (const EAcousticSolver Solver : SolverOptions())
+			{
+				SolverCombo->AddOption(UAcousticSimulationSubsystem::SolverName(Solver));
+			}
+		}
+		SolverCombo->OnSelectionChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleSolverChanged);
+	}
+	if (ImagesCheck)
+	{
+		ImagesCheck->OnCheckStateChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleImagesChanged);
+	}
+	if (ImagesOnlyValidCheck)
+	{
+		ImagesOnlyValidCheck->OnCheckStateChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleImagesOnlyValidChanged);
+	}
+	if (BeamsCheck)
+	{
+		BeamsCheck->OnCheckStateChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleBeamsChanged);
+	}
+	if (BeamsContainingCheck)
+	{
+		BeamsContainingCheck->OnCheckStateChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleBeamsContainingChanged);
+	}
+	if (BeamOrderSlider)
+	{
+		BeamOrderSlider->OnValueChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleBeamOrderChanged);
+	}
 	if (SettingsBox && Fields.IsEmpty())
 	{
 		BuildSettingsRows();
@@ -267,7 +309,7 @@ void USimulationHUDWidget::BuildDefaultTree()
 	};
 
 	TitleText = MakeText(TEXT("TitleText"), 16, AccentColor, true);
-	TitleText->SetText(LOCTEXT("Title", "Simulation: ray tracer"));
+	TitleText->SetText(LOCTEXT("Title", "Simulation"));
 	AddRow(TitleText, 0.f, 2.f);
 
 	StatusText = MakeText(TEXT("StatusText"), 11, LabelColor);
@@ -330,7 +372,7 @@ void USimulationHUDWidget::BuildDefaultTree()
 	BuildAuralizationBlock(Column);
 
 	HintText = MakeText(TEXT("HintText"), 10, MutedColor);
-	HintText->SetText(LOCTEXT("Hint", "Tab: cursor / fly   Enter in a field applies it   1 / 2: Dry / Ray   Esc: main menu"));
+	HintText->SetText(LOCTEXT("Hint", "Tab: cursor / fly   Enter in a field applies it   1 / 2 / 3: Dry / Ray / Beam   Esc: main menu"));
 	AddRow(HintText, 0.f, 0.f);
 
 	// Impulse-response panel, bottom-left.
@@ -427,6 +469,43 @@ void USimulationHUDWidget::BuildVisualizationBlock(UVerticalBox* Column)
 	}
 	AddRow(PathRow, 0.f, 3.f);
 
+	// Row 1b: image sources (M5).
+	UHorizontalBox* ImageRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ImageRow"));
+	ImagesCheck = AddCheck(ImageRow, TEXT("ImagesCheck"), 0.f);
+	AddLabel(ImageRow, LOCTEXT("Images", "Image sources"), 4.f);
+	ImagesOnlyValidCheck = AddCheck(ImageRow, TEXT("ImagesOnlyValidCheck"), 10.f);
+	AddLabel(ImageRow, LOCTEXT("ImagesOnlyValid", "Only valid for receiver"), 4.f);
+	AddRow(ImageRow, 0.f, 3.f);
+
+	// Row 1c: beams (M5): toggle, receiver filter, order slider.
+	UHorizontalBox* BeamRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BeamRow"));
+	BeamsCheck = AddCheck(BeamRow, TEXT("BeamsCheck"), 0.f);
+	AddLabel(BeamRow, LOCTEXT("Beams", "Beams"), 4.f);
+	BeamsContainingCheck = AddCheck(BeamRow, TEXT("BeamsContainingCheck"), 10.f);
+	AddLabel(BeamRow, LOCTEXT("BeamsContaining", "Only with receiver"), 4.f);
+	AddLabel(BeamRow, LOCTEXT("BeamOrder", "Order <="), 10.f);
+	BeamOrderSlider = WidgetTree->ConstructWidget<USlider>(USlider::StaticClass(), TEXT("BeamOrderSlider"));
+	BeamOrderSlider->SetMinValue(0.f);
+	BeamOrderSlider->SetMaxValue(3.f);
+	BeamOrderSlider->SetStepSize(1.f);
+	BeamOrderSlider->SetValue(1.f);
+	BeamOrderSlider->MouseUsesStep = true;
+	USizeBox* SliderSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	SliderSize->SetWidthOverride(80.f);
+	SliderSize->SetContent(BeamOrderSlider);
+	if (UHorizontalBoxSlot* SliderSlot = BeamRow->AddChildToHorizontalBox(SliderSize))
+	{
+		SliderSlot->SetVerticalAlignment(VAlign_Center);
+		SliderSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
+	}
+	BeamOrderText = MakeText(TEXT("BeamOrderText"), 11, ValueColor, true);
+	BeamOrderText->SetText(FText::FromString(TEXT("1")));
+	if (UHorizontalBoxSlot* OrderTextSlot = BeamRow->AddChildToHorizontalBox(BeamOrderText))
+	{
+		OrderTextSlot->SetVerticalAlignment(VAlign_Center);
+	}
+	AddRow(BeamRow, 0.f, 3.f);
+
 	// Row 2: heatmap and metric.
 	UHorizontalBox* HeatRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HeatRow"));
 	HeatmapCheck = AddCheck(HeatRow, TEXT("HeatmapCheck"), 0.f);
@@ -473,9 +552,10 @@ void USimulationHUDWidget::BuildAuralizationBlock(UVerticalBox* Column)
 	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("AuralizationRow"));
 	DryButton = MakeButton(TEXT("DryButton"), LOCTEXT("DryVariant", "1: Dry"), ButtonColor);
 	RayButton = MakeButton(TEXT("RayButton"), LOCTEXT("RayVariant", "2: Ray"), ButtonColor);
+	BeamButton = MakeButton(TEXT("BeamButton"), LOCTEXT("BeamVariant", "3: Beam"), ButtonColor);
 	PlayClipButton = MakeButton(TEXT("PlayClipButton"), LOCTEXT("PlayClip", "Play"), FLinearColor(0.15f, 0.4f, 0.2f));
 	StopClipButton = MakeButton(TEXT("StopClipButton"), LOCTEXT("StopClip", "Stop"), FLinearColor(0.4f, 0.15f, 0.15f));
-	for (UButton* Button : { DryButton.Get(), RayButton.Get(), PlayClipButton.Get(), StopClipButton.Get() })
+	for (UButton* Button : { DryButton.Get(), RayButton.Get(), BeamButton.Get(), PlayClipButton.Get(), StopClipButton.Get() })
 	{
 		if (UHorizontalBoxSlot* ButtonSlot = Row->AddChildToHorizontalBox(Button))
 		{
@@ -497,9 +577,41 @@ void USimulationHUDWidget::BuildSettingsRows()
 		return;
 	}
 	SettingsBox->ClearChildren();
-	for (const FName& Id : { FieldNumRays, FieldMaxOrder, FieldSeed, FieldReceiverRadius, FieldBinMs, FieldTMax, FieldNumThreads, FieldWallAlpha, FieldAirAbsorption })
+	for (const FName& Id : { FieldNumRays, FieldMaxOrder, FieldSeed, FieldReceiverRadius, FieldBinMs, FieldTMax, FieldNumThreads, FieldWallAlpha, FieldAirAbsorption, FieldImageOrder, FieldBeamSubdiv, FieldBeamOrder })
 	{
 		Fields.Remove(Id);
+	}
+
+	// Solver selector (M5).
+	{
+		UHorizontalBox* Line = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("SolverRow"));
+		UTextBlock* Label = MakeText(NAME_None, 11, LabelColor);
+		Label->SetText(LOCTEXT("Solver", "Solver"));
+		if (UHorizontalBoxSlot* LabelSlot = Line->AddChildToHorizontalBox(Label))
+		{
+			LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			LabelSlot->SetVerticalAlignment(VAlign_Center);
+			LabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+		}
+		SolverCombo = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("SolverCombo"));
+		for (const EAcousticSolver Solver : SolverOptions())
+		{
+			SolverCombo->AddOption(UAcousticSimulationSubsystem::SolverName(Solver));
+		}
+		SolverCombo->SetSelectedIndex(0);
+		SolverCombo->OnSelectionChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleSolverChanged);
+		USizeBox* ComboSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		ComboSize->SetWidthOverride(124.f);
+		ComboSize->SetContent(SolverCombo);
+		if (UHorizontalBoxSlot* ComboSlot = Line->AddChildToHorizontalBox(ComboSize))
+		{
+			ComboSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		if (UVerticalBoxSlot* LineSlot = SettingsBox->AddChildToVerticalBox(Line))
+		{
+			LineSlot->SetPadding(FMargin(0.f, 1.f, 0.f, 3.f));
+			LineSlot->SetHorizontalAlignment(HAlign_Fill);
+		}
 	}
 
 	struct FRowSpec
@@ -511,6 +623,9 @@ void USimulationHUDWidget::BuildSettingsRows()
 		{ FieldNumRays, LOCTEXT("NumRays", "Rays") },
 		{ FieldMaxOrder, LOCTEXT("MaxOrder", "Max order") },
 		{ FieldSeed, LOCTEXT("Seed", "Seed") },
+		{ FieldImageOrder, LOCTEXT("ImageOrder", "Image sources: order (<= 3)") },
+		{ FieldBeamSubdiv, LOCTEXT("BeamSubdiv", "Beams: subdivision (0=20, 2=320)") },
+		{ FieldBeamOrder, LOCTEXT("BeamOrder", "Beams: max order") },
 		{ FieldReceiverRadius, LOCTEXT("ReceiverRadius", "Receiver r, m (0 = own)") },
 		{ FieldBinMs, LOCTEXT("BinMs", "Bin, ms") },
 		{ FieldTMax, LOCTEXT("TMax", "T max, s") },
@@ -701,6 +816,104 @@ void USimulationHUDWidget::HandleRayClicked()
 	SelectVariant(2);
 }
 
+void USimulationHUDWidget::HandleBeamClicked()
+{
+	SelectVariant(3);
+}
+
+TArray<EAcousticSolver> USimulationHUDWidget::SolverOptions()
+{
+	return { EAcousticSolver::RayTracer, EAcousticSolver::ImageSource, EAcousticSolver::BeamTracer };
+}
+
+UImageSourceVisualizerComponent* USimulationHUDWidget::GetImageSourceVisualizer() const
+{
+	const AAcousticSimulationManager* Current = Manager.Get();
+	return Current ? Current->ImageSourceVisualizer.Get() : nullptr;
+}
+
+UBeamVisualizerComponent* USimulationHUDWidget::GetBeamVisualizer() const
+{
+	const AAcousticSimulationManager* Current = Manager.Get();
+	return Current ? Current->BeamVisualizer.Get() : nullptr;
+}
+
+void USimulationHUDWidget::HandleSolverChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
+{
+	const TArray<EAcousticSolver> Options = SolverOptions();
+	const int32 Index = SolverCombo ? SolverCombo->GetSelectedIndex() : INDEX_NONE;
+	AAcousticSimulationManager* Current = Manager.Get();
+	if (Current && Options.IsValidIndex(Index) && Current->Solver != Options[Index])
+	{
+		Current->Solver = Options[Index];
+		UE_LOG(LogAcoustics, Log, TEXT("Solver selected: %s"), *UAcousticSimulationSubsystem::SolverName(Current->Solver));
+	}
+	RefreshTitle();
+}
+
+void USimulationHUDWidget::RefreshTitle()
+{
+	if (!TitleText)
+	{
+		return;
+	}
+	const AAcousticSimulationManager* Current = Manager.Get();
+	const FString Solver = Current ? UAcousticSimulationSubsystem::SolverName(Current->Solver) : TEXT("ray tracer");
+	TitleText->SetText(FText::Format(LOCTEXT("TitleFormat", "Simulation: {0}"), FText::FromString(Solver)));
+}
+
+void USimulationHUDWidget::HandleImagesChanged(bool bChecked)
+{
+	if (UImageSourceVisualizerComponent* Images = GetImageSourceVisualizer())
+	{
+		Images->SetEnabled(bChecked);
+	}
+	RefreshVisualization();
+}
+
+void USimulationHUDWidget::HandleImagesOnlyValidChanged(bool bChecked)
+{
+	if (UImageSourceVisualizerComponent* Images = GetImageSourceVisualizer())
+	{
+		Images->SetReceiverFilter(SelectedReceiver);
+		Images->SetOnlyValidForReceiver(bChecked);
+	}
+	RefreshVisualization();
+}
+
+void USimulationHUDWidget::HandleBeamsChanged(bool bChecked)
+{
+	if (UBeamVisualizerComponent* Beams = GetBeamVisualizer())
+	{
+		Beams->SetEnabled(bChecked);
+	}
+	RefreshVisualization();
+}
+
+void USimulationHUDWidget::HandleBeamsContainingChanged(bool bChecked)
+{
+	if (UBeamVisualizerComponent* Beams = GetBeamVisualizer())
+	{
+		Beams->SetReceiverFilter(SelectedReceiver);
+		Beams->SetOnlyBeamsContainingReceiver(bChecked);
+	}
+	RefreshVisualization();
+}
+
+void USimulationHUDWidget::HandleBeamOrderChanged(float Value)
+{
+	const int32 Order = FMath::RoundToInt(Value);
+	if (BeamOrderText)
+	{
+		BeamOrderText->SetText(FText::AsNumber(Order));
+	}
+	if (UBeamVisualizerComponent* Beams = GetBeamVisualizer())
+	{
+		Beams->SetMaxDrawOrder(Order);
+	}
+	RefreshVisualization();
+}
+
 void USimulationHUDWidget::SelectVariant(int32 Key)
 {
 	if (AAcousticsPlayerController* Controller = GetOwningPlayer<AAcousticsPlayerController>())
@@ -740,6 +953,12 @@ void USimulationHUDWidget::RefreshAuralization()
 	if (RayButton)
 	{
 		RayButton->SetBackgroundColor(Auralization && Auralization->Variant == EAuralizationVariant::Ray ? SelectedButtonColor : ButtonColor);
+		RayButton->SetIsEnabled(Auralization && Auralization->HasVariantResult(EAuralizationVariant::Ray));
+	}
+	if (BeamButton)
+	{
+		BeamButton->SetBackgroundColor(Auralization && Auralization->Variant == EAuralizationVariant::Beam ? SelectedButtonColor : ButtonColor);
+		BeamButton->SetIsEnabled(Auralization && Auralization->HasVariantResult(EAuralizationVariant::Beam));
 	}
 }
 
@@ -830,6 +1049,18 @@ void USimulationHUDWidget::HandleFieldCommitted(FName FieldId, const FText& Text
 		}
 		RefreshVisualization();
 	}
+	else if (FieldId == FieldImageOrder)
+	{
+		Settings.ImageSourceOrder = FMath::Clamp(IntValue, 0, 6);
+	}
+	else if (FieldId == FieldBeamSubdiv)
+	{
+		Settings.SubdivisionLevel = FMath::Clamp(IntValue, 0, 5);
+	}
+	else if (FieldId == FieldBeamOrder)
+	{
+		Settings.MaxBeamOrder = FMath::Clamp(IntValue, 0, 10);
+	}
 	LoadFieldsFromManager();
 }
 
@@ -844,6 +1075,14 @@ void USimulationHUDWidget::HandleResultReady(AAcousticSimulationManager* InManag
 	if (InManager && InManager->PathVisualizer)
 	{
 		InManager->PathVisualizer->SetReceiverFilter(SelectedReceiver);
+	}
+	if (InManager && InManager->ImageSourceVisualizer)
+	{
+		InManager->ImageSourceVisualizer->SetReceiverFilter(SelectedReceiver);
+	}
+	if (InManager && InManager->BeamVisualizer)
+	{
+		InManager->BeamVisualizer->SetReceiverFilter(SelectedReceiver);
 	}
 	if (InManager && InManager->Auralization)
 	{
@@ -866,6 +1105,14 @@ void USimulationHUDWidget::SelectReceiver(int32 Index)
 	if (Current && Current->PathVisualizer)
 	{
 		Current->PathVisualizer->SetReceiverFilter(SelectedReceiver);
+	}
+	if (UImageSourceVisualizerComponent* Images = GetImageSourceVisualizer())
+	{
+		Images->SetReceiverFilter(SelectedReceiver);
+	}
+	if (UBeamVisualizerComponent* Beams = GetBeamVisualizer())
+	{
+		Beams->SetReceiverFilter(SelectedReceiver); // the tree is not rebuilt: beams containing the new receiver are looked up
 	}
 	if (UAuralizationComponent* Auralization = GetAuralization())
 	{
@@ -913,9 +1160,52 @@ void USimulationHUDWidget::LoadFieldsFromManager()
 	SetField(FieldAirAbsorption, FString::Printf(TEXT("%.4f"), Settings.AirAbsorptionPerMeter));
 	SetField(FieldNumThreads, FString::FromInt(Settings.NumThreads));
 	SetField(FieldWallAlpha, FString::Printf(TEXT("%.2f"), Current->WallAbsorptionOverride));
+	SetField(FieldImageOrder, FString::FromInt(Settings.ImageSourceOrder));
+	SetField(FieldBeamSubdiv, FString::FromInt(Settings.SubdivisionLevel));
+	SetField(FieldBeamOrder, FString::FromInt(Settings.MaxBeamOrder));
 	if (AirAbsorptionCheck)
 	{
 		AirAbsorptionCheck->SetIsChecked(Settings.bAirAbsorption);
+	}
+	if (SolverCombo)
+	{
+		const int32 SolverIndex = SolverOptions().IndexOfByKey(Current->GetEffectiveSolver());
+		if (SolverIndex != INDEX_NONE && SolverCombo->GetSelectedIndex() != SolverIndex)
+		{
+			SolverCombo->SetSelectedIndex(SolverIndex);
+		}
+		RefreshTitle();
+	}
+	if (const UImageSourceVisualizerComponent* Images = Current->ImageSourceVisualizer)
+	{
+		if (ImagesCheck)
+		{
+			ImagesCheck->SetIsChecked(Images->bEnabled);
+		}
+		if (ImagesOnlyValidCheck)
+		{
+			ImagesOnlyValidCheck->SetIsChecked(Images->bOnlyValidForReceiver);
+		}
+	}
+	if (const UBeamVisualizerComponent* Beams = Current->BeamVisualizer)
+	{
+		if (BeamsCheck)
+		{
+			BeamsCheck->SetIsChecked(Beams->bEnabled);
+		}
+		if (BeamsContainingCheck)
+		{
+			BeamsContainingCheck->SetIsChecked(Beams->bOnlyBeamsContainingReceiver);
+		}
+		if (BeamOrderSlider)
+		{
+			BeamOrderSlider->SetMaxValue(static_cast<float>(FMath::Max(1, Beams->GetTreeMaxOrder() >= 0 ? Beams->GetTreeMaxOrder() : Settings.MaxBeamOrder)));
+			BeamOrderSlider->SetValue(static_cast<float>(Beams->MaxDrawOrder));
+		}
+		if (BeamOrderText)
+		{
+			BeamOrderText->SetText(FText::AsNumber(Beams->MaxDrawOrder));
+		}
 	}
 	if (const URayPathVisualizerComponent* Paths = Current->PathVisualizer)
 	{
@@ -948,6 +1238,7 @@ void USimulationHUDWidget::LoadFieldsFromManager()
 
 void USimulationHUDWidget::RefreshStatus()
 {
+	RefreshTitle();
 	const AAcousticSimulationManager* Current = Manager.Get();
 	if (!Current)
 	{
@@ -1042,8 +1333,24 @@ void USimulationHUDWidget::RefreshMetrics()
 	}
 	if (TimingText)
 	{
-		const FString Text = FString::Printf(TEXT("%d rays, %d triangles, mean order %.1f, %lld segments\n%.3f s total (trace %.3f s on %d workers)"),
-			Result->NumRays, Result->NumTriangles, Result->MeanOrder, Result->NumSegments, Result->Timing.TotalSeconds, Result->Timing.TraceSeconds, Result->Timing.NumWorkers);
+		FString Text;
+		if (Result->NumBeamNodes > 0)
+		{
+			Text = FString::Printf(TEXT("%s: %d root beams, %d beam nodes, %d triangles, %d beams contain %s\n%.3f s total (tree %.3f s, receivers %.3f s)"),
+				*Result->SolverName, Result->NumRootBeams, Result->NumBeamNodes, Result->NumTriangles, Receiver.ContainingBeamNodes.Num(), *Receiver.Name,
+				Result->Timing.TotalSeconds, Result->Timing.SetupSeconds, Result->Timing.TraceSeconds);
+		}
+		else if (Result->NumImageSources > 0)
+		{
+			Text = FString::Printf(TEXT("%s: %d image sources, %d valid paths (%d to %s), %d triangles\n%.3f s total (images %.3f s, receivers %.3f s)"),
+				*Result->SolverName, Result->NumImageSources, Result->NumValidImagePaths, Receiver.EarlyReflections.Num(), *Receiver.Name, Result->NumTriangles,
+				Result->Timing.TotalSeconds, Result->Timing.SetupSeconds, Result->Timing.TraceSeconds);
+		}
+		else
+		{
+			Text = FString::Printf(TEXT("%d rays, %d triangles, mean order %.1f, %lld segments\n%.3f s total (trace %.3f s on %d workers)"),
+				Result->NumRays, Result->NumTriangles, Result->MeanOrder, Result->NumSegments, Result->Timing.TotalSeconds, Result->Timing.TraceSeconds, Result->Timing.NumWorkers);
+		}
 		TimingText->SetText(FText::FromString(Text));
 	}
 }
@@ -1107,7 +1414,20 @@ void USimulationHUDWidget::RefreshVisualization()
 	if (VisualizationText)
 	{
 		FString Text;
-		if (Paths && Result && Result->bSuccess)
+		if (Result && Result->bSuccess && Result->NumBeamNodes > 0)
+		{
+			const UBeamVisualizerComponent* Beams = Current->BeamVisualizer;
+			Text = FString::Printf(TEXT("Beams: %d drawn of %d matching (order <= %d, %d triangles); %d image spheres, %d paths"),
+				Beams ? Beams->GetNumDrawnBeams() : 0, Beams ? Beams->GetNumMatchingBeams() : 0, Beams ? Beams->MaxDrawOrder : 0, Beams ? Beams->GetNumTriangles() : 0,
+				Current->ImageSourceVisualizer ? Current->ImageSourceVisualizer->GetNumDrawnImages() : 0, Current->ImageSourceVisualizer ? Current->ImageSourceVisualizer->GetNumDrawnPaths() : 0);
+		}
+		else if (Result && Result->bSuccess && Result->NumImageSources > 0)
+		{
+			const UImageSourceVisualizerComponent* Images = Current->ImageSourceVisualizer;
+			Text = FString::Printf(TEXT("Image sources: %d spheres drawn (%d valid for the receiver) of %d, %d paths, order <= %d"),
+				Images ? Images->GetNumDrawnImages() : 0, Images ? Images->GetNumValidImages() : 0, Result->NumImageSources, Images ? Images->GetNumDrawnPaths() : 0, Images ? Images->MaxDrawOrder : 0);
+		}
+		else if (Paths && Result && Result->bSuccess)
 		{
 			Text = FString::Printf(TEXT("Paths: %d drawn of %d matching (%d sampled, every %d-th ray), %d segments"),
 				Paths->GetNumDrawnPaths(), Paths->GetNumMatchingPaths(), Result->Paths.Num(), Result->PathSampleStride, Paths->GetNumDrawnSegments());
@@ -1117,6 +1437,11 @@ void USimulationHUDWidget::RefreshVisualization()
 			Text = TEXT("Paths: no result yet");
 		}
 		VisualizationText->SetText(FText::FromString(Text));
+	}
+	if (BeamOrderSlider && Current && Current->BeamVisualizer)
+	{
+		const int32 TreeOrder = Current->BeamVisualizer->GetTreeMaxOrder();
+		BeamOrderSlider->SetMaxValue(static_cast<float>(FMath::Max(1, TreeOrder >= 0 ? TreeOrder : Current->Settings.MaxBeamOrder)));
 	}
 
 	if (HeatmapLegend)
