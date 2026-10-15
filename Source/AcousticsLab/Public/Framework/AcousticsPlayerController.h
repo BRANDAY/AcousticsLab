@@ -6,6 +6,7 @@
 
 class UInputAction;
 class UInputMappingContext;
+class UBenchmarkWidget;
 class UMainMenuWidget;
 class USimulationHUDWidget;
 struct FInputActionValue;
@@ -14,6 +15,7 @@ struct FInputActionValue;
  * Player controller for every level. Owns the Enhanced Input setup (actions and mapping context are created in C++,
  * no input assets needed), shows the main menu in Level_MainMenu and returns to it on Esc elsewhere.
  * Scene levels get the simulation panel (USimulationHUDWidget); Tab toggles between cursor (UI) and fly mode.
+ * The benchmark panel (UBenchmarkWidget, M7) replaces it in ?mode=Benchmark (menu 1.3); B toggles the two in any scene level.
  * Keys 1-6 select the A/B variant (SPEC §3.7).
  */
 UCLASS()
@@ -31,6 +33,19 @@ public:
 	/** Widget class of the simulation panel shown in scene levels. Defaults to the C++ USimulationHUDWidget. */
 	UPROPERTY(EditDefaultsOnly, Category = "Acoustics|UI")
 	TSubclassOf<USimulationHUDWidget> SimulationHUDWidgetClass;
+
+	/** Widget class of the benchmark panel (M7). Defaults to the C++ UBenchmarkWidget. */
+	UPROPERTY(EditDefaultsOnly, Category = "Acoustics|UI")
+	TSubclassOf<UBenchmarkWidget> BenchmarkWidgetClass;
+
+	/** Shows the benchmark panel instead of the simulation panel (true) or the other way round; creates it on first use. */
+	UFUNCTION(BlueprintCallable, Category = "Acoustics")
+	void ShowBenchmarkPanel(bool bShow);
+
+	UFUNCTION(BlueprintPure, Category = "Acoustics")
+	bool IsBenchmarkPanelShown() const;
+
+	UBenchmarkWidget* GetBenchmarkPanel() const { return BenchmarkPanel; }
 
 	/** Cursor mode: the mouse drives the panel instead of the camera. Tab toggles it; scene levels start in it. */
 	UFUNCTION(BlueprintCallable, Category = "Acoustics")
@@ -69,6 +84,7 @@ private:
 	void OnMoveUp(const FInputActionValue& Value);
 	void OnMenu(const FInputActionValue& Value);
 	void OnToggleUI(const FInputActionValue& Value);
+	void OnToggleBenchmark(const FInputActionValue& Value);
 	void OnSelectVariant(const FInputActionValue& Value, int32 Variant);
 
 	UPROPERTY()
@@ -90,6 +106,9 @@ private:
 	TObjectPtr<UInputAction> ToggleUIAction;
 
 	UPROPERTY()
+	TObjectPtr<UInputAction> ToggleBenchmarkAction;
+
+	UPROPERTY()
 	TArray<TObjectPtr<UInputAction>> VariantActions;
 
 	UPROPERTY()
@@ -97,6 +116,9 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<USimulationHUDWidget> SimulationHUD;
+
+	UPROPERTY()
+	TObjectPtr<UBenchmarkWidget> BenchmarkPanel;
 
 	bool bIsMainMenu = false;
 	bool bUIMode = false;

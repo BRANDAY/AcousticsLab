@@ -10,6 +10,7 @@
 #include "AcousticSimulationManager.generated.h"
 
 struct FAcousticScene;
+struct FBeamTracerSettings;
 class AAcousticSource;
 class AReceiverGrid;
 class UAuralizationComponent;
@@ -203,6 +204,19 @@ public:
 
 	/** Extracts the acoustic geometry of the world (meters, BVH built) and applies WallAbsorptionOverride. */
 	bool ExtractScene(FAcousticScene& OutScene, FString& OutError);
+
+	/**
+	 * Medium (by the source actor's MediumName, added to the scene when it is a known preset) and directivity of the
+	 * source of the next run written into beam-tracer settings; OutNote describes it for the log. No-op without sources.
+	 */
+	void ApplySourceToBeamSettings(FAcousticScene& Scene, FBeamTracerSettings& InOutSettings, FString& OutNote) const;
+
+	/**
+	 * Everything a beam-tracer run of this level needs, exactly as Run() prepares it (M7 benchmark): the extracted scene,
+	 * the source, the receivers (grid tiles only with bIncludeGrids) and Settings.ToBeamTracerSettings() with the source
+	 * medium / cone applied. Runs nothing; false with a message when the level lacks geometry or actors.
+	 */
+	bool PrepareBeamRun(FAcousticScene& OutScene, FVector3d& OutSource, TArray<FSolverReceiver>& OutReceivers, FBeamTracerSettings& OutSettings, bool bIncludeGrids, FString& OutError);
 
 	/** Sabine / Eyring for the shoebox room of the level; clears the reference elsewhere. */
 	void ComputeAnalyticReference(const FAcousticScene& Scene);

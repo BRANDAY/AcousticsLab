@@ -112,7 +112,7 @@ bool FAcousticScene::IntersectRayBruteForce(const FAcousticRay& Ray, FRayHit& Ou
 	return AcousticGeometry::IntersectRayBruteForce(Triangles, Ray, OutHit, Options);
 }
 
-bool FAcousticScene::IsOccluded(const FVector3d& From, const FVector3d& To, int32 IgnoreTriangle) const
+bool FAcousticScene::IsOccluded(const FVector3d& From, const FVector3d& To, int32 IgnoreTriangle, bool bAllowBVH) const
 {
 	const FVector3d Delta = To - From;
 	const double Distance = Delta.Length();
@@ -124,7 +124,8 @@ bool FAcousticScene::IsOccluded(const FVector3d& From, const FVector3d& To, int3
 	Options.TMax = Distance - FRayQueryOptions::DefaultTMin;
 	Options.IgnoreTriangle = IgnoreTriangle;
 	FRayHit Hit;
-	return IntersectRay(FAcousticRay(From, Delta / Distance), Hit, Options);
+	const FAcousticRay Ray(From, Delta / Distance);
+	return bAllowBVH ? IntersectRay(Ray, Hit, Options) : IntersectRayBruteForce(Ray, Hit, Options);
 }
 
 double FAcousticScene::TotalArea() const
@@ -228,4 +229,41 @@ FAcousticScene FAcousticScene::MakeShoebox(const FVector3d& SizeMeters, const FA
 
 	Scene.BuildBVH();
 	return Scene;
+}
+
+FAcousticScene FAcousticScene::Tessellated(int32 Divisions) const
+{
+	FAcousticScene Result;
+	Result.Materials = Materials;
+	Result.Media = Media;
+	const int32 N = FMath::Max(1, Divisions);
+	Result.Triangles.Reserve(Triangles.Num() * N * N);
+	for (const FAcousticTriangle& Triangle : Triangles)
+	{
+		// Grid P(i, j) = V0 + i/N (V1 - V0) + j/N (V2 - V0), i + j <= N; both sub-triangle kinds keep the winding of (V0, V1, V2).
+		const FVector3d EdgeI = (Triangle.V1 - Triangle.V0) / N;
+		const FVector3d EdgeJ = (Triangle.V2 - Triangle.V0) / N;
+		auto Point = [&](int32 I, int32 J) { return Triangle.V0 + EdgeI * I + EdgeJ * J; };
+		auto Add = [&](const FVector3d& A, const FVector3d& B, const FVector3d& C)
+		{
+			FAcousticTriangle Piece = Triangle;
+			Piece.V0 = A;
+			Piece.V1 = B;
+			Piece.V2 = C;
+			Result.AddTriangle(Piece);
+		};
+		for (int32 I = 0; I < N; ++I)
+		{
+			for (int32 J = 0; I + J < N; ++J)
+			{
+				Add(Point(I, J), Point(I + 1, J), Point(I, J + 1));
+				if (I + J < N - 1)
+				{
+					Add(Point(I + 1, J), Point(I + 1, J + 1), Point(I, J + 1));
+				}
+			}
+		}
+	}
+	Result.BuildBVH();
+	return Result;
 }

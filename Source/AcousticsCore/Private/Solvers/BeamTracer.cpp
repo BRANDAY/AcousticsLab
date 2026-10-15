@@ -1,5 +1,7 @@
 #include "Solvers/BeamTracer.h"
+#include "Solvers/BeamTreeBuild.h"
 #include "Solvers/ImageSourceSolver.h"
+#include "Solvers/ParallelBeamTracer.h"
 
 #include "AcousticsCore.h"
 #include "Algo/Sort.h"
@@ -644,10 +646,14 @@ namespace
 		FPolygon2d InsideOther;
 		TArray<FIntVector> Fan;
 
-		FBeamBuilder(const FAcousticScene& InScene, const FBeamTracerSettings& InSettings, FBeamTree& InTree)
+		/** Shared state of the build (memory guard, log limiter); null for a standalone builder. */
+		const FBeamBuildContext* Context = nullptr;
+
+		FBeamBuilder(const FAcousticScene& InScene, const FBeamTracerSettings& InSettings, FBeamTree& InTree, const FBeamBuildContext* InContext = nullptr)
 			: Scene(InScene)
 			, Settings(InSettings)
 			, Tree(InTree)
+			, Context(InContext)
 		{
 		}
 
@@ -735,6 +741,13 @@ namespace
 			}
 			if (Tree.Nodes.Num() >= Settings.MaxBeamNodes)
 			{
+				Tree.bTruncated = true;
+				return;
+			}
+			if (Context && Context->NodeCount.fetch_add(1, std::memory_order_relaxed) >= Context->NodeCap)
+			{
+				// Memory guard of a parallel build (all subtrees together): cut wherever the workers are.
+				Context->bOverflow.store(true, std::memory_order_relaxed);
 				Tree.bTruncated = true;
 				return;
 			}
@@ -1091,7 +1104,8 @@ namespace
 				if (bCovered)
 				{
 					++Tree.NumUnresolved;
-					if (Tree.NumUnresolved <= 5)
+					const bool bLog = Context ? Context->UnresolvedLogs.fetch_add(1, std::memory_order_relaxed) < 5 : Tree.NumUnresolved <= 5;
+					if (bLog)
 					{
 						const FVector3d Direction = Frame.Unproject(Center);
 						FString Covering;
@@ -1123,100 +1137,113 @@ namespace
 	};
 }
 
-TSharedPtr<FBeamTree> FBeamTracer::BuildTree(const FAcousticScene& Scene, const FVector3d& Source, const FBeamTracerSettings& Settings, FSolverProgress* Progress)
+
+void AcousticsBeamBuild::InitContext(FBeamBuildContext& Context, const FAcousticScene& Scene, const FVector3d& Source, const FBeamTracerSettings& Settings, FSolverProgress* Progress)
 {
-	SCOPE_CYCLE_COUNTER(STAT_AcousticsBeamTracerBuild);
-	TRACE_CPUPROFILER_EVENT_SCOPE(FBeamTracer::BuildTree);
-
-	TSharedPtr<FBeamTree> Tree = MakeShared<FBeamTree>();
-	Tree->Source = Source;
-	Tree->SourceMedium = Scene.Media.IsValidIndex(Settings.SourceMedium) ? Settings.SourceMedium : 0;
-	Tree->SubdivisionLevel = Settings.SubdivisionLevel;
-	Tree->MaxOrder = Settings.MaxBeamOrder;
-	Tree->NumRootBeams = FBeamTracerSettings::NumRootBeams(Settings.SubdivisionLevel);
-	Tree->NumNodesPerOrder.Init(0, Settings.MaxBeamOrder + 1);
+	Context.Scene = &Scene;
+	Context.Settings = &Settings;
+	Context.Progress = Progress;
+	Context.Source = Source;
+	Context.SourceMedium = Scene.Media.IsValidIndex(Settings.SourceMedium) ? Settings.SourceMedium : 0;
+	Context.NumRootBeams = FBeamTracerSettings::NumRootBeams(Settings.SubdivisionLevel);
 	const FBox3d Bounds = Scene.ComputeBounds();
-	Tree->EscapeLength = Bounds.IsValid ? FMath::Max(10.0, 1.5 * Bounds.GetSize().Length()) : 10.0;
+	Context.EscapeLength = Bounds.IsValid ? FMath::Max(10.0, 1.5 * Bounds.GetSize().Length()) : 10.0;
+	Context.bRefraction = Settings.bRefraction && Scene.HasInterfaces();
+	Context.NodeCap = 2 * static_cast<int64>(Settings.MaxBeamNodes);
+	Context.NodeCount.store(0, std::memory_order_relaxed);
+	Context.bOverflow.store(false, std::memory_order_relaxed);
+	Context.UnresolvedLogs.store(0, std::memory_order_relaxed);
 
-	TArray<FVector3d> Directions;
-	EmissionDirections(Settings.SubdivisionLevel, Directions);
+	FBeamTracer::EmissionDirections(Settings.SubdivisionLevel, Context.Directions);
 
 	// Reflection sequences are identified by surface (coplanar triangle group), not by triangle: the two halves of a wall
 	// give the same image source, and a receiver on their shared edge would otherwise count the reflection twice.
 	TArray<FReflectingSurface> Surfaces;
 	FImageSourceSolver::BuildSurfaces(Scene, Surfaces);
-	TArray<int32> TriangleSurface;
-	TriangleSurface.Init(INDEX_NONE, Scene.Triangles.Num());
+	Context.TriangleSurface.Init(INDEX_NONE, Scene.Triangles.Num());
 	for (int32 SurfaceIndex = 0; SurfaceIndex < Surfaces.Num(); ++SurfaceIndex)
 	{
 		for (const int32 TriangleIndex : Surfaces[SurfaceIndex].Triangles)
 		{
-			TriangleSurface[TriangleIndex] = SurfaceIndex;
+			Context.TriangleSurface[TriangleIndex] = SurfaceIndex;
 		}
 	}
-
-	FBeamBuilder Builder(Scene, Settings, *Tree);
-	Tree->Nodes.Reserve(FMath::Min(Settings.MaxBeamNodes, Tree->NumRootBeams * 8));
 
 	// Order 0: the emission beams (only those inside the cone of a directional source).
 	const FVector3d ConeAxis = Settings.SourceDirection.GetSafeNormal();
 	const double ConeCos = FMath::Cos(FMath::DegreesToRadians(FMath::Clamp(Settings.SourceConeHalfAngleDeg, 0.0, 180.0)));
-	const bool bRefraction = Settings.bRefraction && Scene.HasInterfaces();
-	for (int32 Beam = 0; Beam < Tree->NumRootBeams; ++Beam)
+	Context.EmittedRoots.Reset(Context.NumRootBeams);
+	for (int32 Beam = 0; Beam < Context.NumRootBeams; ++Beam)
 	{
-		if (Progress && Progress->IsCancelRequested())
-		{
-			return Tree;
-		}
-		FPendingBeam Pending;
-		Pending.Apex = Source;
-		for (int32 Index = 0; Index < 3; ++Index)
-		{
-			Pending.Directions[Index] = Directions[Beam * 3 + Index];
-		}
 		if (Settings.bDirectionalSource && !ConeAxis.IsNearlyZero())
 		{
-			const FVector3d Centre = (Pending.Directions[0] + Pending.Directions[1] + Pending.Directions[2]).GetSafeNormal();
+			const FVector3d Centre = (Context.Directions[Beam * 3] + Context.Directions[Beam * 3 + 1] + Context.Directions[Beam * 3 + 2]).GetSafeNormal();
 			if (FVector3d::DotProduct(Centre, ConeAxis) < ConeCos)
 			{
 				continue;
 			}
 		}
-		for (double& Value : Pending.Factor)
-		{
-			Value = 1.0;
-		}
-		Pending.RootBeam = Beam;
-		Pending.Medium = Tree->SourceMedium;
-		++Tree->NumRootBeamsEmitted;
-		if (!Builder.Divide(Pending))
-		{
-			break;
-		}
+		Context.EmittedRoots.Add(Beam);
 	}
-	Tree->NumNodesPerOrder[0] = Tree->Nodes.Num();
-	if (Progress)
+}
+
+void AcousticsBeamBuild::BuildRootSubtree(const FBeamBuildContext& Context, int32 Slot, FBeamTree& Tree)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(AcousticsBeamBuild::BuildRootSubtree);
+	const FAcousticScene& Scene = *Context.Scene;
+	const FBeamTracerSettings& Settings = *Context.Settings;
+	FSolverProgress* Progress = Context.Progress;
+	const int32 Root = Context.EmittedRoots[Slot];
+
+	Tree = FBeamTree();
+	Tree.Source = Context.Source;
+	Tree.SourceMedium = Context.SourceMedium;
+	Tree.SubdivisionLevel = Settings.SubdivisionLevel;
+	Tree.MaxOrder = Settings.MaxBeamOrder;
+	Tree.NumRootBeams = Context.NumRootBeams;
+	Tree.NumRootBeamsEmitted = 1;
+	Tree.EscapeLength = Context.EscapeLength;
+	Tree.NumNodesPerOrder.Init(0, Settings.MaxBeamOrder + 1);
+	if (Progress && Progress->IsCancelRequested())
 	{
-		Progress->Add(1);
+		return;
 	}
 
-	// Reflections, breadth-first: every node with a hit triangle spawns a reflected beam while the order allows.
-	int32 LevelStart = 0;
-	for (int32 Order = 1; Order <= Settings.MaxBeamOrder && !Tree->bTruncated; ++Order)
+	FBeamBuilder Builder(Scene, Settings, Tree, &Context);
+	FPendingBeam Pending;
+	Pending.Apex = Context.Source;
+	for (int32 Index = 0; Index < 3; ++Index)
 	{
-		const int32 LevelEnd = Tree->Nodes.Num();
+		Pending.Directions[Index] = Context.Directions[Root * 3 + Index];
+	}
+	for (double& Value : Pending.Factor)
+	{
+		Value = 1.0;
+	}
+	Pending.RootBeam = Root;
+	Pending.Medium = Context.SourceMedium;
+	Builder.Divide(Pending);
+	Tree.NumNodesPerOrder[0] = Tree.Nodes.Num();
+
+	// Reflections, breadth-first within the subtree: every node with a hit triangle spawns a reflected beam (and a
+	// refracted one at an interface) while the order allows.
+	const bool bRefraction = Context.bRefraction;
+	int32 LevelStart = 0;
+	for (int32 Order = 1; Order <= Settings.MaxBeamOrder && !Tree.bTruncated; ++Order)
+	{
+		const int32 LevelEnd = Tree.Nodes.Num();
 		for (int32 Index = LevelStart; Index < LevelEnd; ++Index)
 		{
 			if (Progress && Progress->IsCancelRequested())
 			{
-				return Tree;
+				return;
 			}
 			FPendingBeam Reflected;
 			FPendingBeam Refracted;
 			bool bHasReflected = false;
 			bool bHasRefracted = false;
 			{
-				const FBeamNode& Node = Tree->Nodes[Index];
+				const FBeamNode& Node = Tree.Nodes[Index];
 				if (Node.HitTriangle == INDEX_NONE)
 				{
 					continue;
@@ -1246,10 +1273,10 @@ TSharedPtr<FBeamTree> FBeamTracer::BuildTree(const FAcousticScene& Scene, const 
 					// Total internal reflection is decided for the beam by its axis (Sikora 2012, sec. 3.3.4: the incoming angle of
 					// the divided beam); guide rays of a refracting beam that lie beyond the critical angle are clamped to grazing.
 					FVector3d RefractedAxis;
-					const bool bTotalInternal = !RefractDirection(Node.Axis(), Node.HitPlane.Normal, From.SpeedOfSound, To.SpeedOfSound, RefractedAxis);
+					const bool bTotalInternal = !FBeamTracer::RefractDirection(Node.Axis(), Node.HitPlane.Normal, From.SpeedOfSound, To.SpeedOfSound, RefractedAxis);
 					for (int32 I = 0; I < 3 && !bTotalInternal; ++I)
 					{
-						RefractDirection(Node.Directions[I], Node.HitPlane.Normal, From.SpeedOfSound, To.SpeedOfSound, RefractedDirections[I], MaxGuideRaySinRefracted);
+						FBeamTracer::RefractDirection(Node.Directions[I], Node.HitPlane.Normal, From.SpeedOfSound, To.SpeedOfSound, RefractedDirections[I], FBeamTracer::MaxGuideRaySinRefracted);
 					}
 					const double R = bTotalInternal ? 1.0 : FMedium::ReflectionFactor(From, To);
 					TransmissionFactor = bTotalInternal ? 0.0 : 1.0 - R;
@@ -1259,8 +1286,8 @@ TSharedPtr<FBeamTree> FBeamTracer::BuildTree(const FAcousticScene& Scene, const 
 					}
 					if (bTotalInternal)
 					{
-						++Tree->NumTotalInternalReflections;
-						Tree->Nodes[Index].bTotalInternalReflection = true;
+						++Tree.NumTotalInternalReflections;
+						Tree.Nodes[Index].bTotalInternalReflection = true;
 					}
 				}
 				else
@@ -1284,18 +1311,18 @@ TSharedPtr<FBeamTree> FBeamTracer::BuildTree(const FAcousticScene& Scene, const 
 					Reflected.ReflectionPlane = Node.HitPlane;
 					Reflected.bHasReflectionPlane = true;
 					Reflected.ReflectionTriangle = Node.HitTriangle;
-					Reflected.Apex = MirrorPoint(Node.Apex, Node.HitPlane);
+					Reflected.Apex = FBeamTracer::MirrorPoint(Node.Apex, Node.HitPlane);
 					for (int32 I = 0; I < 3; ++I)
 					{
-						Reflected.Directions[I] = ReflectDirection(Node.Directions[I], Node.HitPlane.Normal);
+						Reflected.Directions[I] = FBeamTracer::ReflectDirection(Node.Directions[I], Node.HitPlane.Normal);
 					}
 					Reflected.Order = Order;
 					Reflected.Parent = Index;
 					Reflected.RootBeam = Node.RootBeam;
-					Reflected.SequenceHash = CombineSequence(Node.SequenceHash, TriangleSurface[Node.HitTriangle]);
+					Reflected.SequenceHash = CombineSequence(Node.SequenceHash, Context.TriangleSurface[Node.HitTriangle]);
 					Reflected.Medium = Node.Medium;
 					Reflected.NumRefractions = Node.NumRefractions;
-					Reflected.bFocusAhead = Reflected.ReflectionPlane.SignedDistance(Reflected.Apex) > MinApexClearance;
+					Reflected.bFocusAhead = Reflected.ReflectionPlane.SignedDistance(Reflected.Apex) > FBeamTracer::MinApexClearance;
 				}
 
 				// The refracted beam (SPEC §2.6): guide rays by Snell from the parent's cross-section on the interface,
@@ -1306,16 +1333,16 @@ TSharedPtr<FBeamTree> FBeamTracer::BuildTree(const FAcousticScene& Scene, const 
 				{
 					const FVector3d Centre = (Node.EndPoints[0] + Node.EndPoints[1] + Node.EndPoints[2]) / 3.0;
 					FVector3d Apex;
-					const bool bConverged = LeastSquaresApex(MakeArrayView(Node.EndPoints, 3), MakeArrayView(RefractedDirections, 3), Apex);
+					const bool bConverged = FBeamTracer::LeastSquaresApex(MakeArrayView(Node.EndPoints, 3), MakeArrayView(RefractedDirections, 3), Apex);
 					const FAcousticPlane EntryPlane(-Node.HitPlane.Normal, Centre);
 					double ApexDistance = EntryPlane.SignedDistance(Apex);
-					if (!bConverged || FMath::Abs(ApexDistance) < MinApexClearance)
+					if (!bConverged || FMath::Abs(ApexDistance) < FBeamTracer::MinApexClearance)
 					{
 						// Parallel guide rays (or an apex in the entry plane): a beam from far away.
 						const FVector3d Mean = (RefractedDirections[0] + RefractedDirections[1] + RefractedDirections[2]).GetSafeNormal();
-						Apex = Centre - Mean * ParallelApexDistance;
+						Apex = Centre - Mean * FBeamTracer::ParallelApexDistance;
 						ApexDistance = EntryPlane.SignedDistance(Apex);
-						++Tree->NumParallelApexes;
+						++Tree.NumParallelApexes;
 					}
 					const double RIn = (Node.Apex - Centre).Length();
 					const double R1 = (Apex - Centre).Length();
@@ -1347,12 +1374,12 @@ TSharedPtr<FBeamTree> FBeamTracer::BuildTree(const FAcousticScene& Scene, const 
 						Refracted.Order = Order;
 						Refracted.Parent = Index;
 						Refracted.RootBeam = Node.RootBeam;
-						Refracted.SequenceHash = CombineSequence(Node.SequenceHash, TriangleSurface[Node.HitTriangle], true);
+						Refracted.SequenceHash = CombineSequence(Node.SequenceHash, Context.TriangleSurface[Node.HitTriangle], true);
 						Refracted.Medium = OtherMedium;
 						Refracted.NumRefractions = Node.NumRefractions + 1;
 						Refracted.bRefracted = true;
 						Refracted.bFocusAhead = ApexDistance > 0.0;
-						++Tree->NumRefracted;
+						++Tree.NumRefracted;
 					}
 				}
 			}
@@ -1365,161 +1392,168 @@ TSharedPtr<FBeamTree> FBeamTracer::BuildTree(const FAcousticScene& Scene, const 
 				break;
 			}
 		}
-		Tree->NumNodesPerOrder[Order] = Tree->Nodes.Num() - LevelEnd;
+		Tree.NumNodesPerOrder[Order] = Tree.Nodes.Num() - LevelEnd;
 		LevelStart = LevelEnd;
-		if (Progress)
+	}
+}
+
+TSharedPtr<FBeamTree> AcousticsBeamBuild::MergeSubtrees(const FBeamBuildContext& Context, TArray<FBeamTree>& Subtrees)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(AcousticsBeamBuild::MergeSubtrees);
+	const FBeamTracerSettings& Settings = *Context.Settings;
+	TSharedPtr<FBeamTree> Tree = MakeShared<FBeamTree>();
+	Tree->Source = Context.Source;
+	Tree->SourceMedium = Context.SourceMedium;
+	Tree->SubdivisionLevel = Settings.SubdivisionLevel;
+	Tree->MaxOrder = Settings.MaxBeamOrder;
+	Tree->NumRootBeams = Context.NumRootBeams;
+	Tree->NumRootBeamsEmitted = Context.EmittedRoots.Num();
+	Tree->EscapeLength = Context.EscapeLength;
+	Tree->NumNodesPerOrder.Init(0, Settings.MaxBeamOrder + 1);
+
+	// Counters (integers: their sum does not depend on the order).
+	int64 Total = 0;
+	for (const FBeamTree& Subtree : Subtrees)
+	{
+		Total += Subtree.Nodes.Num();
+		Tree->NumEscaped += Subtree.NumEscaped;
+		Tree->NumUnresolved += Subtree.NumUnresolved;
+		Tree->NumSlivers += Subtree.NumSlivers;
+		Tree->NumRefracted += Subtree.NumRefracted;
+		Tree->NumTotalInternalReflections += Subtree.NumTotalInternalReflections;
+		Tree->NumContinuations += Subtree.NumContinuations;
+		Tree->NumParallelApexes += Subtree.NumParallelApexes;
+		Tree->bTruncated |= Subtree.bTruncated;
+	}
+	const bool bOverflow = Context.bOverflow.load(std::memory_order_relaxed);
+	const int32 Kept = static_cast<int32>(FMath::Min<int64>(Total, Settings.MaxBeamNodes));
+	Tree->bTruncated |= Total > Settings.MaxBeamNodes || bOverflow;
+	Tree->Nodes.Reserve(Kept);
+
+	// Breadth-first: order by order, subtree by subtree (root order), each subtree with its nodes of that order in their
+	// own order. A subtree is breadth-first itself, so its nodes of one order are contiguous and one cursor per subtree
+	// suffices; a parent always precedes its children, so its global index is known when a child is appended.
+	TArray<int32> Cursors;
+	Cursors.Init(0, Subtrees.Num());
+	TArray<TArray<int32>> LocalToGlobal;
+	LocalToGlobal.SetNum(Subtrees.Num());
+	for (int32 Slot = 0; Slot < Subtrees.Num(); ++Slot)
+	{
+		LocalToGlobal[Slot].Init(INDEX_NONE, Subtrees[Slot].Nodes.Num());
+	}
+	for (int32 Order = 0; Order <= Settings.MaxBeamOrder && Tree->Nodes.Num() < Kept; ++Order)
+	{
+		for (int32 Slot = 0; Slot < Subtrees.Num() && Tree->Nodes.Num() < Kept; ++Slot)
 		{
-			Progress->Add(1);
+			const TArray<FBeamNode>& Local = Subtrees[Slot].Nodes;
+			int32& Cursor = Cursors[Slot];
+			while (Cursor < Local.Num() && Local[Cursor].Order == Order && Tree->Nodes.Num() < Kept)
+			{
+				FBeamNode Node = Local[Cursor];
+				if (Node.Parent != INDEX_NONE)
+				{
+					Node.Parent = LocalToGlobal[Slot][Node.Parent];
+					ensureMsgf(Node.Parent != INDEX_NONE, TEXT("beam subtree %d: the parent of node %d was not merged before it"), Slot, Cursor);
+				}
+				LocalToGlobal[Slot][Cursor] = Tree->Nodes.Num();
+				Tree->Nodes.Add(MoveTemp(Node));
+				++Tree->NumNodesPerOrder[Order];
+				++Cursor;
+			}
 		}
+	}
+	if (bOverflow)
+	{
+		UE_LOG(LogAcoustics, Warning, TEXT("BeamTracer: the subtrees together exceeded %lld nodes; the build stopped wherever the workers were, so this truncated tree depends on the scheduling"), Context.NodeCap);
 	}
 	return Tree;
 }
 
-void FBeamTracer::QueryReceivers(const FAcousticScene& Scene, const FBeamTree& Tree, TConstArrayView<FSolverReceiver> Receivers, const FBeamTracerSettings& Settings, FSimulationResult& Result)
+void AcousticsBeamBuild::QueryReceiver(const FAcousticScene& Scene, const FBeamTree& Tree, const FSolverReceiver& Receiver, const FBeamTracerSettings& Settings, FReceiverResult& Out, TArray<FBeamContribution>& Contributions, TArray<int32>& SegmentMedia)
 {
 	const double SpeedOfSound = Scene.GetMedium(Tree.SourceMedium).SpeedOfSound;
+	Out.Name = Receiver.Name;
+	Out.Position = Receiver.Position;
+	Out.Radius = Receiver.Radius;
+	Out.Histogram.Init(Settings.BinSeconds, Settings.MaxTimeSeconds);
+	Out.EarlyReflections.Reset();
+	Out.ContainingBeamNodes.Reset();
+	const double Radius2 = Receiver.Radius * Receiver.Radius;
+
+	Tree.Query(Receiver.Position, Contributions);
+	for (const FBeamContribution& Contribution : Contributions)
+	{
+		Out.ContainingBeamNodes.Add(Contribution.Node);
+		if (Contribution.Order == 0 && Settings.bAnalyticDirectSound)
+		{
+			continue; // the direct sound is added analytically below, like the ray tracer does
+		}
+		const FBeamNode& Node = Tree.Nodes[Contribution.Node];
+		const double Distance = Contribution.Distance;
+		const double Spread = FMath::Min(1.0, Radius2 / (4.0 * FMath::Max(Distance * Distance, 1e-12)));
+		FEarlyReflection Reflection;
+		Reflection.Order = Contribution.Order;
+		Reflection.Distance = Distance;
+		Reflection.ImageSource = Node.Apex;
+		Reflection.BeamNode = Contribution.Node;
+		for (int32 Band = 0; Band < Acoustics::NumBands; ++Band)
+		{
+			Reflection.Energy[Band] = Node.Factor[Band] * Spread * (Settings.bAirAbsorption ? FMath::Exp(-Settings.AirAbsorption[Band] * Distance) : 1.0);
+		}
+		// Delay along the actual path with the speed of sound of every medium (SPEC §2.6); without refraction the path
+		// length equals the apex distance (mirror images) and the delay is d / c.
+		Tree.TracePath(Contribution.Node, Receiver.Position, Reflection.Path, Reflection.Triangles, &SegmentMedia);
+		Reflection.TimeSeconds = Node.NumRefractions > 0 ? FBeamTree::PathDelaySeconds(Scene, Reflection.Path, SegmentMedia) : Distance / SpeedOfSound;
+		Out.Histogram.AddEnergy(Reflection.TimeSeconds, Reflection.Energy);
+		Out.EarlyReflections.Add(MoveTemp(Reflection));
+	}
+	Out.EarlyReflections.Sort([](const FEarlyReflection& A, const FEarlyReflection& B) { return A.TimeSeconds < B.TimeSeconds; });
+
+	// Direct sound and metrics as in the ray tracer (SPEC §2.2.7); the occlusion test follows bUseBVH like every other query.
 	const FVector3d ConeAxis = Settings.SourceDirection.GetSafeNormal();
 	const double ConeCos = FMath::Cos(FMath::DegreesToRadians(FMath::Clamp(Settings.SourceConeHalfAngleDeg, 0.0, 180.0)));
-	Result.Receivers.SetNum(Receivers.Num());
-	TArray<FBeamContribution> Contributions;
-	TArray<int32> SegmentMedia;
-	for (int32 ReceiverIndex = 0; ReceiverIndex < Receivers.Num(); ++ReceiverIndex)
+	Out.DirectDistance = (Out.Position - Tree.Source).Length();
+	Out.DirectArrivalSeconds = Out.DirectDistance / SpeedOfSound;
+	Out.bDirectOccluded = Scene.IsOccluded(Tree.Source, Out.Position, INDEX_NONE, Settings.bUseBVH);
+	if (Settings.bDirectionalSource && !ConeAxis.IsNearlyZero() && FVector3d::DotProduct((Out.Position - Tree.Source).GetSafeNormal(), ConeAxis) < ConeCos)
 	{
-		const FSolverReceiver& Receiver = Receivers[ReceiverIndex];
-		FReceiverResult& Out = Result.Receivers[ReceiverIndex];
-		Out.Name = Receiver.Name;
-		Out.Position = Receiver.Position;
-		Out.Radius = Receiver.Radius;
-		Out.Histogram.Init(Settings.BinSeconds, Settings.MaxTimeSeconds);
-		Out.EarlyReflections.Reset();
-		Out.ContainingBeamNodes.Reset();
-		const double Radius2 = Receiver.Radius * Receiver.Radius;
-
-		Tree.Query(Receiver.Position, Contributions);
-		for (const FBeamContribution& Contribution : Contributions)
-		{
-			Out.ContainingBeamNodes.Add(Contribution.Node);
-			if (Contribution.Order == 0 && Settings.bAnalyticDirectSound)
-			{
-				continue; // the direct sound is added analytically below, like the ray tracer does
-			}
-			const FBeamNode& Node = Tree.Nodes[Contribution.Node];
-			const double Distance = Contribution.Distance;
-			const double Spread = FMath::Min(1.0, Radius2 / (4.0 * FMath::Max(Distance * Distance, 1e-12)));
-			FEarlyReflection Reflection;
-			Reflection.Order = Contribution.Order;
-			Reflection.Distance = Distance;
-			Reflection.ImageSource = Node.Apex;
-			Reflection.BeamNode = Contribution.Node;
-			for (int32 Band = 0; Band < Acoustics::NumBands; ++Band)
-			{
-				Reflection.Energy[Band] = Node.Factor[Band] * Spread * (Settings.bAirAbsorption ? FMath::Exp(-Settings.AirAbsorption[Band] * Distance) : 1.0);
-			}
-			// Delay along the actual path with the speed of sound of every medium (SPEC §2.6); without refraction the path
-			// length equals the apex distance (mirror images) and the delay is d / c.
-			Tree.TracePath(Contribution.Node, Receiver.Position, Reflection.Path, Reflection.Triangles, &SegmentMedia);
-			Reflection.TimeSeconds = Node.NumRefractions > 0 ? FBeamTree::PathDelaySeconds(Scene, Reflection.Path, SegmentMedia) : Distance / SpeedOfSound;
-			Out.Histogram.AddEnergy(Reflection.TimeSeconds, Reflection.Energy);
-			Out.EarlyReflections.Add(MoveTemp(Reflection));
-		}
-		Out.EarlyReflections.Sort([](const FEarlyReflection& A, const FEarlyReflection& B) { return A.TimeSeconds < B.TimeSeconds; });
-
-		// Direct sound and metrics as in the ray tracer (SPEC §2.2.7).
-		Out.DirectDistance = (Out.Position - Tree.Source).Length();
-		Out.DirectArrivalSeconds = Out.DirectDistance / SpeedOfSound;
-		Out.bDirectOccluded = Scene.IsOccluded(Tree.Source, Out.Position);
-		if (Settings.bDirectionalSource && !ConeAxis.IsNearlyZero() && FVector3d::DotProduct((Out.Position - Tree.Source).GetSafeNormal(), ConeAxis) < ConeCos)
-		{
-			Out.bDirectOccluded = true; // outside the cone of a directional source
-		}
-		if (Settings.bAnalyticDirectSound && !Out.bDirectOccluded)
-		{
-			const double Distance2 = FMath::Max(Out.DirectDistance * Out.DirectDistance, 1e-12);
-			const double Direct = FMath::Min(1.0, Out.Radius * Out.Radius / (4.0 * Distance2));
-			double Deposit[Acoustics::NumBands];
-			for (int32 Band = 0; Band < Acoustics::NumBands; ++Band)
-			{
-				Deposit[Band] = Settings.bAirAbsorption ? Direct * FMath::Exp(-Settings.AirAbsorption[Band] * Out.DirectDistance) : Direct;
-			}
-			if (Out.Histogram.AddEnergy(Out.DirectArrivalSeconds, Deposit))
-			{
-				Out.DirectEnergy = Deposit[0];
-			}
-		}
-		Out.Metrics = FRoomMetrics::Compute(Out.Histogram, Out.DirectArrivalSeconds);
+		Out.bDirectOccluded = true; // outside the cone of a directional source
 	}
+	if (Settings.bAnalyticDirectSound && !Out.bDirectOccluded)
+	{
+		const double Distance2 = FMath::Max(Out.DirectDistance * Out.DirectDistance, 1e-12);
+		const double Direct = FMath::Min(1.0, Out.Radius * Out.Radius / (4.0 * Distance2));
+		double Deposit[Acoustics::NumBands];
+		for (int32 Band = 0; Band < Acoustics::NumBands; ++Band)
+		{
+			Deposit[Band] = Settings.bAirAbsorption ? Direct * FMath::Exp(-Settings.AirAbsorption[Band] * Out.DirectDistance) : Direct;
+		}
+		if (Out.Histogram.AddEnergy(Out.DirectArrivalSeconds, Deposit))
+		{
+			Out.DirectEnergy = Deposit[0];
+		}
+	}
+	Out.Metrics = FRoomMetrics::Compute(Out.Histogram, Out.DirectArrivalSeconds);
 }
 
-FSimulationResult FBeamTracer::Run(const FAcousticScene& Scene, const FVector3d& Source, TConstArrayView<FSolverReceiver> InReceivers, const FBeamTracerSettings& Settings, FSolverProgress* Progress)
+TSharedPtr<FBeamTree> FBeamTracer::BuildTree(const FAcousticScene& Scene, const FVector3d& Source, const FBeamTracerSettings& Settings, FSolverProgress* Progress)
+{
+	SCOPE_CYCLE_COUNTER(STAT_AcousticsBeamTracerBuild);
+	FParallelBeamTracer Tracer(Settings.NumThreads, false);
+	return Tracer.BuildTree(Scene, Source, Settings, Progress);
+}
+
+void FBeamTracer::QueryReceivers(const FAcousticScene& Scene, const FBeamTree& Tree, TConstArrayView<FSolverReceiver> Receivers, const FBeamTracerSettings& Settings, FSimulationResult& Result)
+{
+	FParallelBeamTracer Tracer(1, false);
+	Tracer.QueryReceivers(Scene, Tree, Receivers, Settings, Result);
+}
+
+FSimulationResult FBeamTracer::Run(const FAcousticScene& Scene, const FVector3d& Source, TConstArrayView<FSolverReceiver> Receivers, const FBeamTracerSettings& Settings, FSolverProgress* Progress)
 {
 	SCOPE_CYCLE_COUNTER(STAT_AcousticsBeamTracerRun);
 	TRACE_CPUPROFILER_EVENT_SCOPE(FBeamTracer::Run);
-
-	const double StartTime = FPlatformTime::Seconds();
-	FSimulationResult Result;
-	Result.SolverName = Name();
-	Result.SourcePosition = Source;
-	Result.NumTriangles = Scene.NumTriangles();
-	Result.Timing.NumWorkers = 1;
-
-	if (!Settings.Validate(Result.Error))
-	{
-		UE_LOG(LogAcoustics, Error, TEXT("BeamTracer: invalid settings: %s"), *Result.Error);
-		return Result;
-	}
-	if (Settings.bUseBVH && !Scene.HasBVH() && Scene.NumTriangles() > 0)
-	{
-		Result.Error = TEXT("scene has no BVH for its triangles (call BuildBVH) and bUseBVH is set");
-		UE_LOG(LogAcoustics, Error, TEXT("BeamTracer: %s"), *Result.Error);
-		return Result;
-	}
-
-	TArray<FSolverReceiver> Receivers(InReceivers.GetData(), InReceivers.Num());
-	for (FSolverReceiver& Receiver : Receivers)
-	{
-		if (!(Receiver.Radius > 0.0))
-		{
-			Receiver.Radius = Settings.ReceiverRadius;
-		}
-	}
-	if (Progress)
-	{
-		Progress->Reset(Settings.MaxBeamOrder + 1 + Receivers.Num());
-	}
-
-	// The tree depends on the source and the scene only (SPEC §2.5.7); receivers are queries.
-	TSharedPtr<FBeamTree> Tree = BuildTree(Scene, Source, Settings, Progress);
-	Result.Timing.SetupSeconds = FPlatformTime::Seconds() - StartTime;
-	Result.BeamTree = Tree;
-	Result.NumRootBeams = Tree->NumRootBeams;
-	Result.NumBeamNodes = Tree->Nodes.Num();
-	if (Tree->bTruncated)
-	{
-		UE_LOG(LogAcoustics, Warning, TEXT("BeamTracer: node budget of %d reached; the tree is incomplete (%s)"), Settings.MaxBeamNodes, *Tree->DescribeStats());
-	}
-	if (Tree->NumUnresolved > 0)
-	{
-		UE_LOG(LogAcoustics, Warning, TEXT("BeamTracer: %d beam pieces could not be assigned to a nearest triangle and were dropped"), Tree->NumUnresolved);
-	}
-	if (Progress && Progress->IsCancelRequested())
-	{
-		Result.bCancelled = true;
-		Result.Timing.TotalSeconds = FPlatformTime::Seconds() - StartTime;
-		return Result;
-	}
-
-	const double TraceStart = FPlatformTime::Seconds();
-	QueryReceivers(Scene, *Tree, Receivers, Settings, Result);
-	if (Progress)
-	{
-		Progress->Add(Receivers.Num());
-	}
-	Result.Timing.TraceSeconds = FPlatformTime::Seconds() - TraceStart;
-	Result.Timing.MetricsSeconds = 0.0;
-	Result.Timing.TotalSeconds = FPlatformTime::Seconds() - StartTime;
-	Result.bSuccess = true;
-
-	UE_LOG(LogAcoustics, Log, TEXT("BeamTracer: %s"), *Tree->DescribeStats());
-	UE_LOG(LogAcoustics, Log, TEXT("%s"), *Result.Describe());
-	return Result;
+	// One thread runs inline on the caller; more threads (0 = all logical cores) use a dedicated pool (M7, FParallelBeamTracer).
+	FParallelBeamTracer Tracer(Settings.NumThreads, false);
+	return Tracer.Run(Scene, Source, Receivers, Settings, Progress);
 }

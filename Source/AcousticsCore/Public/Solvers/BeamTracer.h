@@ -42,7 +42,11 @@ struct ACOUSTICSCORE_API FBeamTracerSettings
 	/** Direct sound r^2 / (4 d^2) added analytically with an occlusion test, like the ray tracer; order-0 beams then only feed the visualization. */
 	bool bAnalyticDirectSound = true;
 
-	/** Reserved for M7 (parallel subtrees); the M5 build is sequential and the result never depends on it. */
+	/**
+	 * Threads of the build and the receiver queries (M7, FParallelBeamTracer): 1 = inline on the calling thread, N = a
+	 * dedicated pool of N threads, 0 = all logical cores. The result never depends on it (subtrees per root beam, merged
+	 * in a fixed order).
+	 */
 	int32 NumThreads = 0;
 
 	/**
@@ -232,7 +236,9 @@ struct ACOUSTICSCORE_API FBeamTree
  * apex; Sikora 2012 §3.1.2, Sikora 2010). The node factor also carries (r1 / r_in)^2 (apex distances to the start
  * triangle, Sikora 2012 Eq. 6) so the energy density is continuous across the interface. Beyond the critical angle the
  * beam is only reflected (factor 1). Scattering and diffraction are not modelled (TODO: Sikora 2012, sections on
- * diffuse reflection and edge diffraction). Deterministic; no threads in M5 / M6.
+ * diffuse reflection and edge diffraction). Deterministic. Since M7 the tree is built as one breadth-first subtree per
+ * root beam and the subtrees are merged order by order in root order (FParallelBeamTracer distributes the roots and the
+ * receivers over NumThreads threads); the merged tree is node for node the sequential breadth-first tree.
  */
 class ACOUSTICSCORE_API FBeamTracer
 {

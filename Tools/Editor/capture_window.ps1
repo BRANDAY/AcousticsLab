@@ -49,4 +49,4 @@ $dir = [System.IO.Path]::GetDirectoryName($full)
 if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
 $bitmap.Save($full, [System.Drawing.Imaging.ImageFormat]::Png)
 $bitmap.Dispose()
-Write-Output "Saved $full ($width x $height) from '$($process.MainWindowTitle)'"
+Write-Output "Saved $full ($width x $height, client origin $($origin.X),$($origin.Y) on screen) from '$($process.MainWindowTitle)'"

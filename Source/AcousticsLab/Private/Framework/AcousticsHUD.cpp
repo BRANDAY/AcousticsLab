@@ -31,8 +31,8 @@ void AAcousticsHUD::DrawHUD()
 		: FString(TEXT("none (1 = Dry, 2 = Ray, 3 = Beam)"));
 	const FString Line1 = FString::Printf(TEXT("%s   |   mode: %s   |   A/B variant: %s"), *Title, *Mode, *Variant);
 	const FString Line2 = Controller->IsUIMode()
-		? TEXT("Cursor mode: edit the simulation panel, WASD still flies   Tab: fly mode   1: Dry  2: Ray  3: Beam (convolution)   Esc: main menu")
-		: TEXT("WASD + mouse: fly   Q/E: down/up   Tab: cursor mode (panel)   1: Dry  2: Ray  3: Beam (convolution)   Esc: main menu");
+		? TEXT("Cursor mode: edit the simulation panel, WASD still flies   Tab: fly mode   1: Dry  2: Ray  3: Beam (convolution)   B: benchmark panel   Esc: main menu")
+		: TEXT("WASD + mouse: fly   Q/E: down/up   Tab: cursor mode (panel)   1: Dry  2: Ray  3: Beam (convolution)   B: benchmark panel   Esc: main menu");
 
 	DrawText(Line1, FLinearColor::White, 24.f, 24.f, GEngine->GetMediumFont());
 	DrawText(Line2, FLinearColor(0.75f, 0.75f, 0.75f), 24.f, 48.f, GEngine->GetSmallFont());

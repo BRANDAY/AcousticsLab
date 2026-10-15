@@ -312,6 +312,70 @@ void AAcousticSimulationManager::ComputeAnalyticReference(const FAcousticScene& 
 	EyringT60 = RoomAcoustics::EyringT60(RoomVolumeM3, RoomSurfaceM2, MeanAbsorption, AirAbsorption);
 }
 
+void AAcousticSimulationManager::ApplySourceToBeamSettings(FAcousticScene& Scene, FBeamTracerSettings& InOutSettings, FString& OutNote) const
+{
+	OutNote.Reset();
+	if (const AAcousticSource* SourceActor = ResolveSourceActor())
+	{
+		// Medium of the source (SPEC §2.6) and its directivity (the unidirectional source of the lens test, Sikora 2012).
+		InOutSettings.SourceMedium = 0;
+		if (!SourceActor->MediumName.IsNone())
+		{
+			int32 MediumId = Scene.FindMedium(SourceActor->MediumName.ToString());
+			if (MediumId == INDEX_NONE)
+			{
+				FMedium Medium;
+				const ALevelSetupActor* Setup = ALevelSetupActor::Find(GetWorld());
+				const bool bKnown = Setup && Setup->SceneExtractor ? Setup->SceneExtractor->FindMedium(SourceActor->MediumName, Medium) : AcousticMediumPresets::Find(SourceActor->MediumName, Medium);
+				if (bKnown)
+				{
+					MediumId = Scene.FindOrAddMedium(Medium);
+				}
+				else
+				{
+					UE_LOG(LogAcoustics, Warning, TEXT("Source %s: unknown medium '%s', using %s"), *SourceActor->SourceId.ToString(), *SourceActor->MediumName.ToString(), *Scene.Media[0].Name);
+					MediumId = 0;
+				}
+			}
+			InOutSettings.SourceMedium = MediumId;
+		}
+		InOutSettings.bDirectionalSource = SourceActor->bDirectional;
+		InOutSettings.SourceDirection = SourceActor->GetDirection();
+		InOutSettings.SourceConeHalfAngleDeg = SourceActor->ConeHalfAngleDeg;
+		OutNote = FString::Printf(TEXT("source %s in %s%s"), *SourceActor->SourceId.ToString(), *Scene.GetMedium(InOutSettings.SourceMedium).Name,
+			SourceActor->bDirectional ? *FString::Printf(TEXT(", cone %.1f deg"), SourceActor->ConeHalfAngleDeg) : TEXT(""));
+	}
+}
+
+bool AAcousticSimulationManager::PrepareBeamRun(FAcousticScene& OutScene, FVector3d& OutSource, TArray<FSolverReceiver>& OutReceivers, FBeamTracerSettings& OutSettings, bool bIncludeGrids, FString& OutError)
+{
+	if (!ExtractScene(OutScene, OutError))
+	{
+		return false;
+	}
+	TArray<FReceiverBinding> Bindings;
+	if (!CollectSceneActors(OutSource, OutReceivers, Bindings, OutError))
+	{
+		return false;
+	}
+	if (!bIncludeGrids)
+	{
+		TArray<FSolverReceiver> PointReceivers;
+		for (int32 Index = 0; Index < OutReceivers.Num(); ++Index)
+		{
+			if (!Bindings.IsValidIndex(Index) || Bindings[Index].Kind != EReceiverBindingKind::GridTile)
+			{
+				PointReceivers.Add(OutReceivers[Index]);
+			}
+		}
+		OutReceivers = MoveTemp(PointReceivers);
+	}
+	OutSettings = Settings.ToBeamTracerSettings();
+	FString Note;
+	ApplySourceToBeamSettings(OutScene, OutSettings, Note);
+	return OutSettings.Validate(OutError);
+}
+
 bool AAcousticSimulationManager::Run()
 {
 	if (IsRunning())
@@ -355,36 +419,7 @@ bool AAcousticSimulationManager::Run()
 	const FImageSourceSettings ImageSourceSettings = Settings.ToImageSourceSettings();
 	FBeamTracerSettings BeamTracerSettings = Settings.ToBeamTracerSettings();
 	FString SourceNote;
-	if (const AAcousticSource* SourceActor = ResolveSourceActor())
-	{
-		// Medium of the source (SPEC §2.6) and its directivity (the unidirectional source of the lens test, Sikora 2012).
-		BeamTracerSettings.SourceMedium = 0;
-		if (!SourceActor->MediumName.IsNone())
-		{
-			int32 MediumId = Scene->FindMedium(SourceActor->MediumName.ToString());
-			if (MediumId == INDEX_NONE)
-			{
-				FMedium Medium;
-				const ALevelSetupActor* Setup = ALevelSetupActor::Find(GetWorld());
-				const bool bKnown = Setup && Setup->SceneExtractor ? Setup->SceneExtractor->FindMedium(SourceActor->MediumName, Medium) : AcousticMediumPresets::Find(SourceActor->MediumName, Medium);
-				if (bKnown)
-				{
-					MediumId = Scene->FindOrAddMedium(Medium);
-				}
-				else
-				{
-					UE_LOG(LogAcoustics, Warning, TEXT("Source %s: unknown medium '%s', using %s"), *SourceActor->SourceId.ToString(), *SourceActor->MediumName.ToString(), *Scene->Media[0].Name);
-					MediumId = 0;
-				}
-			}
-			BeamTracerSettings.SourceMedium = MediumId;
-		}
-		BeamTracerSettings.bDirectionalSource = SourceActor->bDirectional;
-		BeamTracerSettings.SourceDirection = SourceActor->GetDirection();
-		BeamTracerSettings.SourceConeHalfAngleDeg = SourceActor->ConeHalfAngleDeg;
-		SourceNote = FString::Printf(TEXT("source %s in %s%s"), *SourceActor->SourceId.ToString(), *Scene->GetMedium(BeamTracerSettings.SourceMedium).Name,
-			SourceActor->bDirectional ? *FString::Printf(TEXT(", cone %.1f deg"), SourceActor->ConeHalfAngleDeg) : TEXT(""));
-	}
+	ApplySourceToBeamSettings(*Scene, BeamTracerSettings, SourceNote);
 	bool bValid = true;
 	switch (Effective)
 	{

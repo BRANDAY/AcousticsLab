@@ -15,12 +15,14 @@
 #include "Levels/AcousticsLevels.h"
 #include "Simulation/AcousticSimulationManager.h"
 #include "UI/MainMenuWidget.h"
+#include "UI/BenchmarkWidget.h"
 #include "UI/SimulationHUDWidget.h"
 
 AAcousticsPlayerController::AAcousticsPlayerController()
 {
 	MainMenuWidgetClass = UMainMenuWidget::StaticClass();
 	SimulationHUDWidgetClass = USimulationHUDWidget::StaticClass();
+	BenchmarkWidgetClass = UBenchmarkWidget::StaticClass();
 }
 
 void AAcousticsPlayerController::BeginPlay()
@@ -54,6 +56,10 @@ void AAcousticsPlayerController::BeginPlay()
 	{
 		UE_LOG(LogAcoustics, Log, TEXT("Level %s started, mode=%s"), *UGameplayStatics::GetCurrentLevelName(this, true), *LevelMode.ToString());
 		ShowSimulationHUD();
+		if (LevelMode == FName(TEXT("Benchmark")))
+		{
+			ShowBenchmarkPanel(true); // menu 1.3 (SPEC §0, §2.7)
+		}
 		SetUIMode(true);
 	}
 }
@@ -75,6 +81,7 @@ void AAcousticsPlayerController::SetupInputComponent()
 	Input->BindAction(MoveUpAction, ETriggerEvent::Triggered, this, &AAcousticsPlayerController::OnMoveUp);
 	Input->BindAction(MenuAction, ETriggerEvent::Started, this, &AAcousticsPlayerController::OnMenu);
 	Input->BindAction(ToggleUIAction, ETriggerEvent::Started, this, &AAcousticsPlayerController::OnToggleUI);
+	Input->BindAction(ToggleBenchmarkAction, ETriggerEvent::Started, this, &AAcousticsPlayerController::OnToggleBenchmark);
 	for (int32 Index = 0; Index < VariantActions.Num(); ++Index)
 	{
 		Input->BindAction(VariantActions[Index], ETriggerEvent::Started, this, &AAcousticsPlayerController::OnSelectVariant, Index + 1);
@@ -95,6 +102,8 @@ void AAcousticsPlayerController::BuildInputAssets()
 	MenuAction->ValueType = EInputActionValueType::Boolean;
 	ToggleUIAction = NewObject<UInputAction>(this, TEXT("IA_ToggleUI"));
 	ToggleUIAction->ValueType = EInputActionValueType::Boolean;
+	ToggleBenchmarkAction = NewObject<UInputAction>(this, TEXT("IA_ToggleBenchmark"));
+	ToggleBenchmarkAction->ValueType = EInputActionValueType::Boolean;
 
 	// Maps a key to an action. bSwizzle routes the key to the Y axis (forward), bNegate flips the sign.
 	auto MapAxisKey = [this](UInputAction* Action, const FKey& Key, bool bNegate, bool bSwizzle)
@@ -138,6 +147,7 @@ void AAcousticsPlayerController::BuildInputAssets()
 
 	MappingContext->MapKey(MenuAction, EKeys::Escape);
 	MappingContext->MapKey(ToggleUIAction, EKeys::Tab);
+	MappingContext->MapKey(ToggleBenchmarkAction, EKeys::B);
 
 	// Keys 1-6 are reserved for the A/B variants (SPEC §3.7).
 	constexpr int32 NumVariants = 6;
@@ -187,6 +197,49 @@ void AAcousticsPlayerController::ShowSimulationHUD()
 	}
 	SimulationHUD->SetManager(AAcousticSimulationManager::FindOrSpawn(GetWorld()));
 	SimulationHUD->AddToViewport();
+}
+
+void AAcousticsPlayerController::ShowBenchmarkPanel(bool bShow)
+{
+	if (bIsMainMenu)
+	{
+		return;
+	}
+	if (bShow && !BenchmarkPanel)
+	{
+		if (!BenchmarkWidgetClass)
+		{
+			BenchmarkWidgetClass = UBenchmarkWidget::StaticClass();
+		}
+		BenchmarkPanel = CreateWidget<UBenchmarkWidget>(this, BenchmarkWidgetClass);
+		if (!BenchmarkPanel)
+		{
+			UE_LOG(LogAcoustics, Error, TEXT("Could not create the benchmark panel"));
+			return;
+		}
+		BenchmarkPanel->AddToViewport(1);
+	}
+	if (BenchmarkPanel)
+	{
+		BenchmarkPanel->SetVisibility(bShow ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	}
+	if (SimulationHUD)
+	{
+		SimulationHUD->SetVisibility(bShow ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
+	}
+}
+
+bool AAcousticsPlayerController::IsBenchmarkPanelShown() const
+{
+	return BenchmarkPanel && BenchmarkPanel->GetVisibility() != ESlateVisibility::Collapsed;
+}
+
+void AAcousticsPlayerController::OnToggleBenchmark(const FInputActionValue& Value)
+{
+	if (!bIsMainMenu)
+	{
+		ShowBenchmarkPanel(!IsBenchmarkPanelShown());
+	}
 }
 
 void AAcousticsPlayerController::SetUIMode(bool bEnabled)

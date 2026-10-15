@@ -51,8 +51,8 @@ struct ACOUSTICSCORE_API FAcousticScene
 	bool IntersectRay(const FAcousticRay& Ray, FRayHit& OutHit, const FRayQueryOptions& Options = FRayQueryOptions()) const;
 	bool IntersectRayBruteForce(const FAcousticRay& Ray, FRayHit& OutHit, const FRayQueryOptions& Options = FRayQueryOptions()) const;
 
-	/** True when any triangle (except IgnoreTriangle) cuts the open segment From-To. */
-	bool IsOccluded(const FVector3d& From, const FVector3d& To, int32 IgnoreTriangle = INDEX_NONE) const;
+	/** True when any triangle (except IgnoreTriangle) cuts the open segment From-To; bAllowBVH = false always searches brute force (M7 benchmark). */
+	bool IsOccluded(const FVector3d& From, const FVector3d& To, int32 IgnoreTriangle = INDEX_NONE, bool bAllowBVH = true) const;
 
 	int32 NumTriangles() const { return Triangles.Num(); }
 	double TotalArea() const;
@@ -70,4 +70,11 @@ struct ACOUSTICSCORE_API FAcousticScene
 	 * all walls using WallMaterial, BVH built. Used by the tests and by the Sabine/Eyring validation.
 	 */
 	static FAcousticScene MakeShoebox(const FVector3d& SizeMeters, const FAcousticMaterialProps& WallMaterial = FAcousticMaterialProps());
+
+	/**
+	 * The same surfaces with every triangle split into Divisions^2 coplanar triangles (midpoint grid on the barycentric
+	 * coordinates): same materials, media and interface flags, same area, more triangles - a heavier scene for the M7
+	 * benchmark without new geometry. Divisions <= 1 returns a copy. The BVH is rebuilt.
+	 */
+	FAcousticScene Tessellated(int32 Divisions) const;
 };
