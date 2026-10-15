@@ -2,7 +2,7 @@
 
 [← Guide index](README.md)
 
-A guided tour of what the bench shows today (milestones M0–M6), in the order a reviewer would want to see it. Each step names what to press, what to look at, and where the details are. Times are on the development machine (10 worker threads).
+A guided tour of what the bench shows today (milestones M0–M7), in the order a reviewer would want to see it. Each step names what to press, what to look at, and where the details are. Times are on the development machine (10 worker threads).
 
 **Before you start:** open `AcousticsLab.uproject` in Unreal Engine 5.8.3 (build instructions in the [README](../../README.md#quick-start)). Headphones help in step 5. Keys: **Tab** switches between the panel (cursor) and flying (WASD + mouse, E/Q up/down); **Esc** returns to the menu in Standalone mode.
 
@@ -11,6 +11,8 @@ A guided tour of what the bench shows today (milestones M0–M6), in the order a
 ## 1. The menu (30 s)
 
 Play as **Standalone Game**. The menu mirrors the structure of the work: **1. Methods of M. Sikora** (one entry per paper), **2. Industry** (Steam Audio, Audio Tracing — planned), **3. Compare** (planned). Items that are not built yet open a placeholder level; Esc comes back.
+
+![main menu](img/main_menu.png)
 
 → Choose **1.1 Image sources & beam tracing - Shoebox**.
 
@@ -81,7 +83,7 @@ Details: [8. refraction](08-refraction.md).
 
 ## 8. What is next
 
-- **1.3 Thread-level parallelization (S3)** — the beam-tree build on a thread pool with a benchmark panel and a speed-up chart: in progress ([9](09-parallelization.md)).
+- **1.3 Thread-level parallelization (S3)** — done: the beam-tree build on a thread pool, a benchmark panel with a speed-up chart (about 4× on 6 cores, bit-identical results); 1 minute with the default settings ([9](09-parallelization.md)).
 - **1.4 Hybrid beam/ray tracing (S4)** — planned ([10](10-hybrid.md)).
 - **2. Industry** and **3. Compare** — the same amphitheatre in Steam Audio and Audio Tracing: planned ([11](11-industry-comparison.md)).
 - **Amphitheatre, audience/velarium, soundwalk (S5)** — planned ([12](12-amphitheatre-and-soundwalk.md)).

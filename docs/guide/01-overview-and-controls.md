@@ -28,13 +28,18 @@ Level (Unreal)                               AcousticsCore (pure C++, meters / s
 
 The project starts in `Level_MainMenu` ("ACOUSTICS LAB — Geometric acoustics after M. Sikora in Unreal Engine 5"). Each entry loads a level with a `?mode=` option:
 
+![main menu](img/main_menu.png)
+
+*The status line under the menu still carries the M0 text ("every item opens a placeholder level"); it is outdated.*
+
+
 | Entry | Level | Mode | What is there today | Guide page |
 |---|---|---|---|---|
 | **1. Methods of M. Sikora** | | | | |
 | 1.1 Image sources & beam tracing - Shoebox | `Level_Shoebox` | Beam | the full bench: ray tracer, image sources, beam tracer, metrics, heatmap, auralization | [3](03-stochastic-ray-tracing.md)–[7](07-image-sources-and-beam-tracing.md) |
 | 1.1 Image sources & beam tracing - Amphitheatre | `Level_Amphitheatre` | Beam | placeholder (M10) | [12](12-amphitheatre-and-soundwalk.md) |
 | 1.2 Beam tracing with refraction | `Level_Refraction` | Refraction | pool and acoustic lens | [8](08-refraction.md) |
-| 1.3 Thread-level parallelization (benchmark) | `Level_Shoebox` | Benchmark | regular panel; benchmark panel in M7 | [9](09-parallelization.md) |
+| 1.3 Thread-level parallelization (benchmark) | `Level_Shoebox` | Benchmark | the benchmark panel (thread pool, BVH on/off, speed-up chart) | [9](09-parallelization.md) |
 | 1.4 Hybrid beam/ray tracing | `Level_Shoebox` | Hybrid | regular panel; hybrid in M8 | [10](10-hybrid.md) |
 | 1.5 Audio AR soundwalk (optional) | `Level_Amphitheatre` | Soundwalk | placeholder (M10) | [12](12-amphitheatre-and-soundwalk.md) |
 | **2. Industry** | | | | |
@@ -44,7 +49,7 @@ The project starts in `Level_MainMenu` ("ACOUSTICS LAB — Geometric acoustics a
 | Metrics table & A/B listening | `Level_Shoebox` | Compare | regular panel; compare panel in M8–M9 | [11](11-industry-comparison.md) |
 | Quit | | | closes the game | |
 
-The mode is currently **informational only**: it is shown in the top-left HUD line and logged, but no panel or solver reads it yet — the level opens with the solver saved in its `SimulationManager` (ray tracer in `Level_Shoebox`, beam tracer with refraction in `Level_Refraction`). Per-mode panels arrive with M7–M10.
+Apart from `Benchmark`, which opens the benchmark panel, the mode is currently **informational only**: it is shown in the top-left HUD line and logged, but no panel or solver reads it yet — the level opens with the solver saved in its `SimulationManager` (ray tracer in `Level_Shoebox`, beam tracer with refraction in `Level_Refraction`). Per-mode panels arrive with M8–M10.
 
 Run it as **Standalone Game** (Play dropdown → Standalone Game) to use Esc → menu: in PIE the editor itself takes Esc to stop play. To work on one scene in PIE, open the level directly (`Content/Maps/Level_Shoebox`, `Level_Refraction`) and press Play.
 
@@ -60,6 +65,7 @@ Run it as **Standalone Game** (Play dropdown → Standalone Game) to use Esc →
 | **2** | A/B: Ray — the clip convolved with the ray-tracer response of the selected receiver |
 | **3** | A/B: Beam — the same with the beam-tracer response |
 | 4 / 5 / 6 | Hybrid / Steam Audio / Audio Tracing — bound, no signal path yet (M8 / M9) |
+| **B** | switch between the simulation panel and the benchmark panel (scene levels) |
 | **Esc** | back to the main menu (Standalone) |
 
 The camera is a flying first-person pawn (6 m/s, collides with the walls). The top-left HUD line shows `<level> - <description> | mode: <mode> | A/B variant: <n (name)>` and the key hints of the current mode.
@@ -102,4 +108,4 @@ Select `SimulationManager` in a level → Details:
 
 ## Automated tests
 
-27 automation tests, all named `AcousticsLab.Core.<Area>.<Case>`; they run headless or from Tools → Session Frontend → Automation (filter `AcousticsLab`). The full list with tolerances is in the [guide index](README.md#validation-at-a-glance).
+30 automation tests, all named `AcousticsLab.Core.<Area>.<Case>`; they run headless or from Tools → Session Frontend → Automation (filter `AcousticsLab`). The full list with tolerances is in the [guide index](README.md#validation-at-a-glance).

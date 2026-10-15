@@ -2,7 +2,7 @@
 
 [← Guide index](README.md)
 
-The guide currently uses the milestone screenshots in [`docs/milestones/img`](../milestones/img) (and one cropped copy in [`img/`](img)). This list is what is missing or should be retaken once the editor is free. New files go to `docs/guide/img/` with the names below; then replace the links in the pages named in the last column.
+The guide currently uses the milestone screenshots in [`docs/milestones/img`](../milestones/img) and a few crops in [`img/`](img) (main menu, benchmark panel, the M5 beam view). The rest is captured in **one pass after M10**, when all panels are final. New files go to `docs/guide/img/` with the names below; then replace the links in the pages named in the last column.
 
 ## How to capture (recipes in [`docs/ENV.md`](../ENV.md))
 
@@ -13,11 +13,12 @@ The guide currently uses the milestone screenshots in [`docs/milestones/img`](..
 - Prefer captures that show only the PIE viewport (crop the editor's menus, Outliner and Details panels), 1600–1920 px wide. The walls of the shoebox and of the pool are single-sided, so a camera placed **outside** the room sees everything inside — use that for overview shots.
 - For the panel close-ups crop to the panel only.
 
-## Missing
+## Missing (capture after M10)
+
+Done: `main_menu.png` (PIE of `Level_MainMenu`), `benchmark_panel.png` (crop of `M7_benchmark_panel.png`).
 
 | # | File | Level / mode | Camera and settings | What it must show | Used in |
 |---|---|---|---|---|---|
-| 1 | `main_menu.png` | `Level_MainMenu`, Standalone Game | full window | the menu tree 1 / 2 / 3, Quit | README, [walkthrough](walkthrough.md) §1, [01](01-overview-and-controls.md) |
 | 2 | `panel_ray_shoebox.png` | `Level_Shoebox`, ray tracer, after Run | crop to the right-hand panel | the current panel: Solver / Source combos, all setting fields, metrics of R1, Sabine / Eyring line, Visualization and Auralization blocks (the M2 shot predates most of them) | [01](01-overview-and-controls.md), [03](03-stochastic-ray-tracing.md) |
 | 3 | `ir_plot_pinned.png` | `Level_Shoebox`, ray tracer | crop to the bottom-left plot; run, select R1, **Pin**; select R3 | three curves: live R3 (cyan) and pinned R1 (orange), −5/−35 dB lines, 50/80 ms markers, legend with T30 / C80 | [05](05-visualization.md), [04](04-room-acoustic-metrics.md) |
 | 4 | `ir_plot_beam_vs_ray.png` | `Level_Shoebox` | beam run → R1 → **Pin**; ray run → R1; crop to the plot | discrete beam arrivals (pinned) against the ray-traced decay | [07](07-image-sources-and-beam-tracing.md), [10](10-hybrid.md) |
@@ -35,7 +36,6 @@ The guide currently uses the milestone screenshots in [`docs/milestones/img`](..
 
 | # | File | Milestone | What it must show | Used in |
 |---|---|---|---|---|
-| 14 | `benchmark_panel.png` | M7 | the benchmark table (threads × BVH on/off) and the speed-up chart | [09](09-parallelization.md) |
 | 15 | `hybrid_compare.png` | M8 | three IR curves (ray / beam / hybrid) and the metrics table | [10](10-hybrid.md) |
 | 16 | `industry_steam.png`, `industry_audiotracing.png`, `compare_table.png` | M9 | the two plugin levels and the Compare table | [11](11-industry-comparison.md) |
 | 17 | `amphitheatre_overview.png`, `amphitheatre_c80_rows.png`, `soundwalk.png` | M10 | the amphitheatre, C80 per row (empty / audience / velarium), the soundwalk HUD | [12](12-amphitheatre-and-soundwalk.md) |
