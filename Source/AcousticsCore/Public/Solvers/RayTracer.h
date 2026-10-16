@@ -101,6 +101,12 @@ public:
 	 */
 	static int32 PathSampleStride(int32 NumRays, int32 MaxPaths);
 	static bool IsPathSampled(int32 RayIndex, int32 NumRays, int32 MaxPaths);
+
+	/** Upper bound of the chunk count: each chunk holds a histogram per receiver until the reduction (memory). */
+	static constexpr int32 MaxChunks = 128;
+
+	/** Rays per chunk used by Run: Settings.RaysPerChunk, raised for large NumRays so that the chunk count <= MaxChunks. */
+	static int32 EffectiveRaysPerChunk(const FRayTracerSettings& Settings);
 	static int32 NumPathSamples(int32 NumRays, int32 MaxPaths);
 
 	/** Reflected rays start this far from the surface along the facing normal, m. */

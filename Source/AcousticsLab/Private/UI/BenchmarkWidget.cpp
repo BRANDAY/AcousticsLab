@@ -554,7 +554,7 @@ bool UBenchmarkWidget::StartBenchmark()
 	{
 		State->Result = FBeamBenchmark::Run(*State->Job.Scene, State->Job.Source, State->Job.Receivers, State->Job.Settings, State->Job.Matrix, State->Job.Info, &State->Progress);
 		State->bDone.store(true);
-	});
+	}, UE::Tasks::ETaskPriority::BackgroundNormal); // waits on the beam pool for minutes: keep the foreground workers free
 	return true;
 }
 

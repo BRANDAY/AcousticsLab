@@ -63,6 +63,10 @@ namespace
 		FVector3d Source;
 		TConstArrayView<FSolverReceiver> Receivers;
 		const FRayTracerSettings& Settings;
+		/** Rays per chunk actually used: Settings.RaysPerChunk, raised so that NumChunks <= MaxChunks (EffectiveRaysPerChunk). */
+		int32 RaysPerChunk = 1024;
+		/** Cancel flag and progress, checked / advanced every CancelCheckRays rays inside a chunk. */
+		FSolverProgress* Progress = nullptr;
 		double SpeedOfSound = Acoustics::SpeedOfSoundAir;
 		double E0 = 0.0;
 		double EnergyCutoff = 0.0;
@@ -275,8 +279,8 @@ namespace
 	void TraceChunk(const FTraceContext& Context, int32 ChunkIndex, FChunkResult& Out)
 	{
 		const FRayTracerSettings& Settings = Context.Settings;
-		const int32 FirstRay = ChunkIndex * Settings.RaysPerChunk;
-		const int32 EndRay = FMath::Min(FirstRay + Settings.RaysPerChunk, Settings.NumRays);
+		const int32 FirstRay = ChunkIndex * Context.RaysPerChunk;
+		const int32 EndRay = FMath::Min(FirstRay + Context.RaysPerChunk, Settings.NumRays);
 
 		Out.Histograms.SetNum(Context.Receivers.Num());
 		for (FEnergyHistogram& Histogram : Out.Histograms)
@@ -303,12 +307,37 @@ namespace
 		}
 		Out.Paths.Reset(NumPaths);
 
+		// Stop (SPEC §3.6 panel) must answer within a fraction of a second even for long chunks: check the flag and
+		// advance the progress every CancelCheckRays rays.
+		constexpr int32 CancelCheckRays = 64;
+		int32 SinceCheck = 0;
 		for (int32 RayIndex = FirstRay; RayIndex < EndRay; ++RayIndex)
 		{
 			FPathSample* Path = FRayTracer::IsPathSampled(RayIndex, Settings.NumRays, Settings.MaxPathsForVisualization) ? &Out.Paths.AddDefaulted_GetRef() : nullptr;
 			TraceRay(Context, RayIndex, Out, Path);
+			if (Context.Progress && ++SinceCheck == CancelCheckRays)
+			{
+				Context.Progress->Add(SinceCheck);
+				SinceCheck = 0;
+				if (Context.Progress->IsCancelRequested())
+				{
+					return;
+				}
+			}
+		}
+		if (Context.Progress && SinceCheck > 0)
+		{
+			Context.Progress->Add(SinceCheck);
 		}
 	}
+}
+
+int32 FRayTracer::EffectiveRaysPerChunk(const FRayTracerSettings& Settings)
+{
+	// Every chunk keeps a histogram per receiver until the fixed-order reduction; bounding the chunk count bounds that
+	// memory (5 M rays x 74 receivers x 6 s at 1 ms took ~17 GB with 1024-ray chunks). Depends on NumRays only, so the
+	// result stays independent of the worker count.
+	return FMath::Max(FMath::Max(1, Settings.RaysPerChunk), FMath::DivideAndRoundUp(Settings.NumRays, MaxChunks));
 }
 
 FVector3d FRayTracer::FibonacciDirection(int32 Index, int32 Count)
@@ -473,6 +502,8 @@ FSimulationResult FRayTracer::Run(const FAcousticScene& Scene, const FVector3d& 
 	}
 
 	FTraceContext Context{ Scene, Source, Receivers, Settings };
+	Context.RaysPerChunk = EffectiveRaysPerChunk(Settings);
+	Context.Progress = Progress;
 	Context.SpeedOfSound = Scene.GetMedium(0).SpeedOfSound;
 	Context.E0 = 1.0 / static_cast<double>(Settings.NumRays);
 	Context.EnergyCutoff = Context.E0 * Settings.EnergyThreshold;
@@ -486,7 +517,7 @@ FSimulationResult FRayTracer::Run(const FAcousticScene& Scene, const FVector3d& 
 		BuildTriangleSurfaceMap(Scene, Context.TriangleSurface);
 	}
 
-	const int32 NumChunks = FMath::DivideAndRoundUp(Settings.NumRays, Settings.RaysPerChunk);
+	const int32 NumChunks = FMath::DivideAndRoundUp(Settings.NumRays, Context.RaysPerChunk);
 	const int32 NumWorkers = FMath::Min(ResolveNumWorkers(Settings.NumThreads), NumChunks);
 	Result.Timing.NumWorkers = NumWorkers;
 	if (Progress)
@@ -508,17 +539,24 @@ FSimulationResult FRayTracer::Run(const FAcousticScene& Scene, const FVector3d& 
 				{
 					return;
 				}
-				TraceChunk(Context, Chunk, Chunks[Chunk]);
-				if (Progress)
-				{
-					Progress->Add(Chunks[Chunk].NumRays);
-				}
+				TraceChunk(Context, Chunk, Chunks[Chunk]); // advances the progress itself
 			}
 		},
-		NumWorkers == 1 ? EParallelForFlags::ForceSingleThread : EParallelForFlags::None);
+		// Background priority: each item runs a worker's whole share of the run, and with the default (normal) priority the
+		// items take the scheduler's few foreground workers (Core/Private/Async/Fundamental/Scheduler.cpp:243-246) for the
+		// whole run, so the game / render threads starve waiting on their own tasks and the editor freezes (Stop cannot be
+		// clicked). Background workers leave the foreground ones to the engine.
+		NumWorkers == 1 ? EParallelForFlags::ForceSingleThread : EParallelForFlags::BackgroundPriority);
 	Result.Timing.TraceSeconds = FPlatformTime::Seconds() - TraceStart;
 
 	Result.bCancelled = Progress && Progress->IsCancelRequested();
+	if (Result.bCancelled)
+	{
+		// Partial chunks are not a result: skip the reduction and the metrics, so Stop returns at once.
+		Result.Timing.TotalSeconds = FPlatformTime::Seconds() - StartTime;
+		UE_LOG(LogAcoustics, Log, TEXT("%s"), *Result.Describe());
+		return Result;
+	}
 
 	// Fixed-order reduction: chunk 0, 1, 2, ... whatever thread produced them.
 	const double MetricsStart = FPlatformTime::Seconds();

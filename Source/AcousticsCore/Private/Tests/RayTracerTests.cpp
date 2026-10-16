@@ -1,4 +1,5 @@
 // M2 solver tests (SPEC §4): shoebox T30 against Eyring, determinism for a fixed seed, thread-count invariance, primitives.
+#include "Async/Async.h"
 #include "Geometry/AcousticScene.h"
 #include "Misc/AutomationTest.h"
 #include "Results/RoomMetrics.h"
@@ -269,6 +270,40 @@ bool FAcousticsThreadCountInvarianceTest::RunTest(const FString& Parameters)
 	{
 		TestTrue(FString::Printf(TEXT("%s: brute force matches the BVH run"), *Receivers[Index].Name), Single.Receivers[Index].Histogram.IsIdentical(BruteForce.Receivers[Index].Histogram));
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAcousticsRayTracerCancelTest, "AcousticsLab.Core.Solvers.RayTracerCancel",
+	EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+
+bool FAcousticsRayTracerCancelTest::RunTest(const FString& Parameters)
+{
+	using namespace AcousticsRayTracerTests;
+
+	// Chunk size: small runs keep RaysPerChunk (the other tests' reductions are unchanged), large runs stay <= MaxChunks.
+	FRayTracerSettings Small = TestSettings(20000, 1, 0);
+	TestEqual(TEXT("20 000 rays keep 1024-ray chunks"), FRayTracer::EffectiveRaysPerChunk(Small), Small.RaysPerChunk);
+	FRayTracerSettings Large = TestSettings(5000000, 1, 0);
+	const int32 LargeChunk = FRayTracer::EffectiveRaysPerChunk(Large);
+	TestTrue(TEXT("5 M rays: at most MaxChunks chunks"), FMath::DivideAndRoundUp(Large.NumRays, LargeChunk) <= FRayTracer::MaxChunks);
+
+	// Stop during a long run (5 M rays, low absorption: minutes uncancelled) returns within a fraction of a second.
+	const FAcousticScene Scene = FAcousticScene::MakeShoebox(RoomSize, FAcousticMaterialProps(TEXT("Validation"), 0.05, 0.2));
+	const TArray<FSolverReceiver> Receivers = ShoeboxReceivers();
+	FSolverProgress Progress;
+	TFuture<void> Canceller = Async(EAsyncExecution::Thread, [&Progress]()
+	{
+		FPlatformProcess::Sleep(0.3f);
+		Progress.RequestCancel();
+	});
+	const double Start = FPlatformTime::Seconds();
+	const FSimulationResult Result = FRayTracer::Run(Scene, SourcePosition, Receivers, Large, &Progress);
+	const double Seconds = FPlatformTime::Seconds() - Start;
+	Canceller.Wait();
+	TestTrue(TEXT("cancelled run is flagged"), Result.bCancelled);
+	TestFalse(TEXT("cancelled run is not a result"), Result.bSuccess);
+	TestTrue(FString::Printf(TEXT("Stop answered quickly (%.2f s after a 0.3 s start)"), Seconds), Seconds < 2.0);
+	TestTrue(TEXT("some rays were traced before the stop"), Progress.Fraction() > 0.0f && Progress.Fraction() < 1.0f);
 	return true;
 }
 

@@ -7,6 +7,7 @@
 #include "EngineUtils.h"
 #include "Geometry/AcousticScene.h"
 #include "HAL/PlatformTime.h"
+#include "Industry/IndustryAudioActor.h"
 #include "Kismet/GameplayStatics.h"
 #include "Levels/LevelSetupActor.h"
 #include "Levels/ShoeboxRoomActor.h"
@@ -28,6 +29,8 @@ AAcousticSimulationManager::AAcousticSimulationManager()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = true;
+	// A paused PIE world must still collect a finished run and honour Stop (the panel keeps working while paused).
+	PrimaryActorTick.bTickEvenWhenPaused = true;
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	PathVisualizer = CreateDefaultSubobject<URayPathVisualizerComponent>(TEXT("PathVisualizer"));
 	Auralization = CreateDefaultSubobject<UAuralizationComponent>(TEXT("Auralization"));
@@ -468,7 +471,9 @@ bool AAcousticSimulationManager::Run()
 				*Result = FRayTracer::Run(*Scene, Source, Receivers, RayTracerSettings, Progress_.Get());
 				break;
 			}
-		});
+		},
+		// A long run must not hold one of the scheduler's few foreground workers: the editor stays responsive and Stop works.
+		UE::Tasks::ETaskPriority::BackgroundNormal);
 
 	if (UAcousticSimulationSubsystem* Subsystem = UAcousticSimulationSubsystem::Get(this))
 	{
@@ -498,6 +503,10 @@ void AAcousticSimulationManager::Stop()
 	{
 		ProgressState->RequestCancel();
 		StatusMessage = TEXT("Cancelling...");
+		if (Task.IsValid() && Task.IsCompleted())
+		{
+			FinishRun(); // the solver is already done: show its result now instead of waiting for the next tick
+		}
 	}
 }
 
@@ -576,6 +585,9 @@ void AAcousticSimulationManager::FinishRun()
 	if (Auralization)
 	{
 		const FString LevelName = UGameplayStatics::GetCurrentLevelName(this, true);
+		// Industry levels (M9): while a plugin source plays (key 5 / 6), a new result must not start our clip on top of it.
+		const AIndustryAudioActor* Industry = AIndustryAudioActor::Find(GetWorld());
+		TGuardValue<bool> AutoPlayGuard(Auralization->bAutoPlayOnResult, Auralization->bAutoPlayOnResult && !(Industry && Industry->IsPluginVariantActive()));
 		if (LastResult->bSuccess && LastHybridResult.IsValid() && LastResult == LastHybridResult->Hybrid)
 		{
 			// One hybrid run feeds three A/B variants (SPEC 3.7): 2 = pure ray, 3 = pure beam (<= K), 4 = hybrid (heard last).

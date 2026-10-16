@@ -220,6 +220,19 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
 	TObjectPtr<UButton> HybridButton;
 
+	/** Industry levels (M9): plugin switch, keys 5 / 6 (the block is collapsed elsewhere). */
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UVerticalBox> IndustryBox;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UButton> SteamAudioButton;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UButton> AudioTracingButton;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Acoustics", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> IndustryText;
+
 private:
 	void BuildDefaultTree();
 	void BuildSettingsRows();
@@ -281,6 +294,12 @@ private:
 	void HandleHybridClicked();
 
 	UFUNCTION()
+	void HandleSteamAudioClicked();
+
+	UFUNCTION()
+	void HandleAudioTracingClicked();
+
+	UFUNCTION()
 	void HandleSolverChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
 
 	UFUNCTION()
@@ -319,6 +338,7 @@ private:
 	void RefreshReference();
 	void RefreshPlot();
 	void RefreshAuralization();
+	void RefreshIndustry();
 	void RefreshTitle();
 	void RefreshVisualization();
 	TArray<AReceiverGrid*> FindGrids() const;

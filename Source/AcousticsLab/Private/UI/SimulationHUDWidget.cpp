@@ -19,6 +19,7 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Framework/AcousticsPlayerController.h"
+#include "Industry/IndustryAudioActor.h"
 #include "Results/SimulationResult.h"
 #include "Scene/ReceiverGrid.h"
 #include "Simulation/AcousticSimulationManager.h"
@@ -192,6 +193,14 @@ void USimulationHUDWidget::NativeConstruct()
 	if (HybridButton)
 	{
 		HybridButton->OnClicked.AddUniqueDynamic(this, &USimulationHUDWidget::HandleHybridClicked);
+	}
+	if (SteamAudioButton)
+	{
+		SteamAudioButton->OnClicked.AddUniqueDynamic(this, &USimulationHUDWidget::HandleSteamAudioClicked);
+	}
+	if (AudioTracingButton)
+	{
+		AudioTracingButton->OnClicked.AddUniqueDynamic(this, &USimulationHUDWidget::HandleAudioTracingClicked);
 	}
 	if (SolverCombo)
 	{
@@ -585,6 +594,32 @@ void USimulationHUDWidget::BuildAuralizationBlock(UVerticalBox* Column)
 	AuralizationText = MakeText(TEXT("AuralizationText"), 10, MutedColor);
 	AuralizationText->SetText(LOCTEXT("NoAuralization", "IR: none yet (Run the simulation)"));
 	AddRow(AuralizationText, 0.f, 6.f);
+
+	// Industry levels (M9): switch between the plugins at runtime; collapsed in the other levels (RefreshIndustry).
+	IndustryBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("IndustryBox"));
+	UTextBlock* IndustryTitle = MakeText(TEXT("IndustryTitle"), 12, AccentColor, true);
+	IndustryTitle->SetText(LOCTEXT("IndustryTitle", "Industry plugins (switch while playing)"));
+	IndustryBox->AddChildToVerticalBox(IndustryTitle);
+	UHorizontalBox* IndustryRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("IndustryRow"));
+	SteamAudioButton = MakeButton(TEXT("SteamAudioButton"), LOCTEXT("SteamAudioVariant", "5: Steam Audio"), ButtonColor);
+	AudioTracingButton = MakeButton(TEXT("AudioTracingButton"), LOCTEXT("AudioTracingVariant", "6: Audio Tracing"), ButtonColor);
+	for (UButton* Button : { SteamAudioButton.Get(), AudioTracingButton.Get() })
+	{
+		if (UHorizontalBoxSlot* ButtonSlot = IndustryRow->AddChildToHorizontalBox(Button))
+		{
+			ButtonSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
+			ButtonSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		}
+	}
+	if (UVerticalBoxSlot* RowSlot = IndustryBox->AddChildToVerticalBox(IndustryRow))
+	{
+		RowSlot->SetPadding(FMargin(0.f, 2.f, 0.f, 3.f));
+	}
+	IndustryText = MakeText(TEXT("IndustryText"), 10, MutedColor);
+	IndustryText->SetAutoWrapText(true);
+	IndustryBox->AddChildToVerticalBox(IndustryText);
+	IndustryBox->SetVisibility(ESlateVisibility::Collapsed);
+	AddRow(IndustryBox, 0.f, 6.f);
 }
 
 void USimulationHUDWidget::BuildSettingsRows()
@@ -1067,7 +1102,15 @@ void USimulationHUDWidget::SelectVariant(int32 Key)
 	{
 		Controller->SelectedVariant = Key;
 	}
-	if (UAuralizationComponent* Auralization = GetAuralization())
+	UAuralizationComponent* Auralization = GetAuralization();
+	// Industry levels: 5 / 6 switch the plugin; 1-4 stop the plugin source first (same routing as the keys).
+	if (AIndustryAudioActor::HandleVariantKeyInWorld(GetWorld(), Key, Auralization))
+	{
+		RefreshAuralization();
+		RefreshIndustry();
+		return;
+	}
+	if (Auralization)
 	{
 		if (Auralization->SetVariantByKey(Key) && !Auralization->IsPlaying() && Auralization->HasImpulseResponse())
 		{
@@ -1075,6 +1118,58 @@ void USimulationHUDWidget::SelectVariant(int32 Key)
 		}
 	}
 	RefreshAuralization();
+	RefreshIndustry();
+}
+
+void USimulationHUDWidget::HandleSteamAudioClicked()
+{
+	SelectVariant(5);
+}
+
+void USimulationHUDWidget::HandleAudioTracingClicked()
+{
+	SelectVariant(6);
+}
+
+void USimulationHUDWidget::RefreshIndustry()
+{
+	if (!IndustryBox)
+	{
+		return;
+	}
+	const TArray<AIndustryAudioActor*> Industries = AIndustryAudioActor::FindAll(GetWorld());
+	IndustryBox->SetVisibility(Industries.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
+	if (Industries.IsEmpty())
+	{
+		return;
+	}
+	const AIndustryAudioActor* SteamAudio = nullptr;
+	const AIndustryAudioActor* AudioTracing = nullptr;
+	for (const AIndustryAudioActor* Industry : Industries)
+	{
+		(Industry->Plugin == EIndustryPlugin::SteamAudio ? SteamAudio : AudioTracing) = Industry;
+	}
+	auto Style = [this](UButton* Button, const AIndustryAudioActor* Industry)
+	{
+		if (Button)
+		{
+			Button->SetIsEnabled(Industry != nullptr);
+			Button->SetBackgroundColor(Industry && Industry->IsPluginVariantActive() ? SelectedButtonColor : ButtonColor);
+		}
+	};
+	Style(SteamAudioButton, SteamAudio);
+	Style(AudioTracingButton, AudioTracing);
+	if (IndustryText)
+	{
+		const AIndustryAudioActor* Active = AIndustryAudioActor::Find(GetWorld());
+		const UWorld* World = GetWorld();
+		FString Text = Active && Active->IsPluginVariantActive() ? Active->DescribeState() : FString(TEXT("No plugin source playing (1-4 = our convolution; 5 / 6 = plugins)"));
+		if (World && World->IsPaused())
+		{
+			Text = TEXT("GAME PAUSED: keys and plugin audio wait until play resumes (editor toolbar Resume / Pause key). ") + Text;
+		}
+		IndustryText->SetText(FText::FromString(Text));
+	}
 }
 
 void USimulationHUDWidget::RefreshAuralization()
@@ -1410,6 +1505,7 @@ void USimulationHUDWidget::LoadFieldsFromManager()
 void USimulationHUDWidget::RefreshStatus()
 {
 	RefreshTitle();
+	RefreshIndustry();
 	const AAcousticSimulationManager* Current = Manager.Get();
 	if (!Current)
 	{

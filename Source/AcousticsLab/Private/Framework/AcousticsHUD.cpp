@@ -37,15 +37,22 @@ void AAcousticsHUD::DrawHUD()
 
 	DrawText(Line1, FLinearColor::White, 24.f, 24.f, GEngine->GetMediumFont());
 	DrawText(Line2, FLinearColor(0.75f, 0.75f, 0.75f), 24.f, 48.f, GEngine->GetSmallFont());
-	// Industry levels (M9): the plugin keys (switch at runtime) and the active plugin's state (spatializer, ray tracing, listener).
-	if (const AIndustryAudioActor* Industry = AIndustryAudioActor::Find(GetWorld()))
+	// Industry levels (M9): the plugin keys and which one plays; short, so the panel on the right does not cover it
+	// (the full state is in the panel's "Industry plugins" block).
+	const TArray<AIndustryAudioActor*> Industries = AIndustryAudioActor::FindAll(GetWorld());
+	if (!Industries.IsEmpty())
 	{
-		FString Keys;
-		for (const AIndustryAudioActor* Actor : AIndustryAudioActor::FindAll(GetWorld()))
+		FString Line3 = TEXT("Plugins:");
+		for (const AIndustryAudioActor* Actor : Industries)
 		{
-			Keys += FString::Printf(TEXT("%d: %s  "), Actor->VariantKey, *Actor->GetPluginDisplayName());
+			Line3 += FString::Printf(TEXT("   %d: %s%s"), Actor->VariantKey, *Actor->GetPluginDisplayName(), Actor->IsPluginVariantActive() ? TEXT(" [PLAYING]") : TEXT(""));
 		}
-		const FString Line3 = FString::Printf(TEXT("%s(plugin switch; listener: console Acoustics.Industry.Receiver R1..R4)   |   %s"), *Keys, *Industry->DescribeState());
+		Line3 += TEXT("   (switch while playing; listener: console Acoustics.Industry.Receiver R1..R4)");
 		DrawText(Line3, FLinearColor(1.0f, 0.85f, 0.4f), 24.f, 66.f, GEngine->GetSmallFont());
+	}
+	// A paused PIE world (editor toolbar Pause, Pause key) ignores the keys and holds the audio: say so.
+	if (GetWorld() && GetWorld()->IsPaused())
+	{
+		DrawText(TEXT("GAME PAUSED - keys and sound wait until play resumes (editor toolbar Resume, or the Pause key)"), FLinearColor(1.0f, 0.3f, 0.3f), 24.f, 88.f, GEngine->GetMediumFont());
 	}
 }
