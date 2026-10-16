@@ -8,7 +8,7 @@ The guide currently uses the milestone screenshots in [`docs/milestones/img`](..
 
 - Start the editor with the MCP server: `UnrealEditor.exe AcousticsLab.uproject /Game/Maps/<Level> -ModelContextProtocolStartServer -ModelContextProtocolPort=8000`.
 - Place the camera before PIE by moving the `PlayerStart` (`ActorTools.set_actor_transform`, location in cm, rotation in degrees); the PIE pawn spawns there. Visualizer settings for a shot are set on the editor actor before `StartPIE` (`ObjectTools.set_properties` on `<manager>.BeamVisualizer` etc.); restore and save afterwards.
-- Capture with `Tools/Editor/capture_window.ps1 -TitlePattern "Unreal Editor" -Out docs/guide/img/<name>.png`. Do **not** use the pattern `AcousticsLab`: it also matches the Claude desktop window.
+- Capture with `Tools/Editor/capture_window.ps1 -TitlePattern "Unreal Editor" -Out docs/guide/img/<name>.png`. Do **not** use the pattern `AcousticsLab`: it also matches other desktop windows with the project name in the title.
 - Turn on Windows "Do not disturb" first — `M5_beamtracer_beams_receiver.png` caught a desktop notification (the guide uses a cropped copy, `img/M5_beams_receiver_crop.png`).
 - Prefer captures that show only the PIE viewport (crop the editor's menus, Outliner and Details panels), 1600–1920 px wide. The walls of the shoebox and of the pool are single-sided, so a camera placed **outside** the room sees everything inside — use that for overview shots.
 - For the panel close-ups crop to the panel only.
