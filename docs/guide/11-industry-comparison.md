@@ -39,7 +39,7 @@ The positions come from one data asset, `DA_AmphitheatrePositions` (SPEC §3.4),
 | R3 | row 20 (last), minor axis | (0, 35.6, 16.1) | 38.4 m |
 | R4 | row 10, major axis (side sector) | (40.1, 0, 8.6) | 40.7 m |
 
-**At M9 the geometry is a stand-in**: a 100 × 80 m concrete arena floor with the source and receivers (the cavea of the amphitheatre is built in M10, [12](12-amphitheatre-and-soundwalk.md); the industry levels are regenerated from the same script afterwards). Materials are mapped from the bench's presets: Concrete (α = 0.03, s = 0.1) → Steam Audio absorption 0.03 in its three bands and scattering 0.1; Audio Tracing reflection factor 0.97, scattering 0.1. Steam Audio's simulation settings are its defaults (real time: 1.0 s impulse response, 4 bounces, 4096 rays).
+**The industry levels still hold the M9 stand-in**: a 100 × 80 m concrete arena floor with the source and receivers. The amphitheatre now exists in `Level_Amphitheatre` (M10, [12](12-amphitheatre-and-soundwalk.md)), but the industry levels have not yet been regenerated on it (the content script needs the new `Stone` material, and Steam Audio's export of dynamic meshes is unchecked). Materials are mapped from the bench's presets: Concrete (α = 0.03, s = 0.1) → Steam Audio absorption 0.03 in its three bands and scattering 0.1; Audio Tracing reflection factor 0.97, scattering 0.1. Steam Audio's simulation settings are its defaults (real time: 1.0 s impulse response, 4 bounces, 4096 rays).
 
 ## How it works
 

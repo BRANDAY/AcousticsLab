@@ -37,11 +37,11 @@ The project starts in `Level_MainMenu` ("ACOUSTICS LAB — Geometric acoustics a
 |---|---|---|---|---|
 | **1. Methods of M. Sikora** | | | | |
 | 1.1 Image sources & beam tracing - Shoebox | `Level_Shoebox` | Beam | the full bench: ray tracer, image sources, beam tracer, metrics, heatmap, auralization | [3](03-stochastic-ray-tracing.md)–[7](07-image-sources-and-beam-tracing.md) |
-| 1.1 Image sources & beam tracing - Amphitheatre | `Level_Amphitheatre` | Beam | arena-floor stand-in with S1, R1–R4 (M9); the amphitheatre is M10, in progress | [12](12-amphitheatre-and-soundwalk.md) |
+| 1.1 Image sources & beam tracing - Amphitheatre | `Level_Amphitheatre` | Beam | the elliptical amphitheatre, audience / velarium toggles, C80 heatmap over the cavea; the ray tracer runs on start | [12](12-amphitheatre-and-soundwalk.md) |
 | 1.2 Beam tracing with refraction | `Level_Refraction` | Refraction | pool and acoustic lens | [8](08-refraction.md) |
 | 1.3 Thread-level parallelization (benchmark) | `Level_Shoebox` | Benchmark | the benchmark panel (thread pool, BVH on/off, speed-up chart) | [9](09-parallelization.md) |
 | 1.4 Hybrid beam/ray tracing | `Level_Shoebox` | Hybrid | the comparison panel: pure ray / pure beam ≤ K / hybrid | [10](10-hybrid.md) |
-| 1.5 Audio AR soundwalk (optional) | `Level_Amphitheatre` | Soundwalk | M10, in progress | [12](12-amphitheatre-and-soundwalk.md) |
+| 1.5 Audio AR soundwalk (optional) | `Level_Amphitheatre` | Soundwalk | the same level; the soundwalk mode is planned | [12](12-amphitheatre-and-soundwalk.md) |
 | **2. Industry** | | | | |
 | 2.1 Steam Audio (Valve) | `Level_Amphitheatre_SteamAudio` | SteamAudio | Steam Audio rendering at R1–R4 (stand-in arena floor), keys 5 / 6 | [11](11-industry-comparison.md) |
 | 2.2 Audio Tracing (Pinpoint, Fab) | `Level_Amphitheatre_AudioTracing` | AudioTracing | the same level starting with Audio Tracing (needs the plugin and an RTX GPU) | [11](11-industry-comparison.md) |

@@ -2,7 +2,7 @@
 
 [← Guide index](README.md)
 
-A guided tour of what the bench shows today (milestones M0–M9), in the order a reviewer would want to see it. Each step names what to press, what to look at, and where the details are. Times are on the development machine (10 worker threads).
+A guided tour of what the bench shows today (milestones M0–M10), in the order a reviewer would want to see it. Each step names what to press, what to look at, and where the details are. Times are on the development machine (10 worker threads).
 
 **Before you start:** open `AcousticsLab.uproject` in Unreal Engine 5.8.3 (build instructions in the [README](../../README.md#quick-start)). Headphones help in step 5. Keys: **Tab** switches between the panel (cursor) and flying (WASD + mouse, E/Q up/down); **Esc** returns to the menu in Standalone mode.
 
@@ -10,7 +10,7 @@ A guided tour of what the bench shows today (milestones M0–M9), in the order a
 
 ## 1. The menu (30 s)
 
-Play as **Standalone Game**. The menu mirrors the structure of the work: **1. Methods of M. Sikora** (one entry per paper), **2. Industry** (Steam Audio, Audio Tracing), **3. Compare** (the hybrid comparison panel with the industry columns). The amphitheatre items (1.1 Amphitheatre, 1.5 soundwalk) belong to M10, in progress; Esc comes back.
+Play as **Standalone Game**. The menu mirrors the structure of the work: **1. Methods of M. Sikora** (one entry per paper), **2. Industry** (Steam Audio, Audio Tracing), **3. Compare** (the hybrid comparison panel with the industry columns). 1.1 Amphitheatre is step 11; 1.5 soundwalk is still planned. Esc comes back.
 
 ![main menu](img/main_menu.png)
 
@@ -107,7 +107,18 @@ At this stage the industry levels contain only a stand-in arena floor (the amphi
 
 Details: [11. industry comparison](11-industry-comparison.md).
 
-## 11. What is next
+## 11. The amphitheatre (1.5 min)
 
-- **Amphitheatre, audience / velarium, soundwalk (S5)** — M10, in progress ([12](12-amphitheatre-and-soundwalk.md)); the industry levels are regenerated on its geometry afterwards.
+Esc → **1.1 Image sources & beam tracing - Amphitheatre**. An elliptical amphitheatre (arena 65 × 40 m, 20 stone rows up to 15 m); the ray tracer runs on start and the C80 heatmap colours 856 receivers on the rows.
+
+1. Read R1 in the panel (20.4 m from the source in the arena): C80 around 0 dB, T30 n/a — in the empty stone cavea the energy keeps circulating along the risers for longer than the 3 s histogram (a known issue of the idealised geometry).
+2. Console `Acoustics.Amphitheatre.Audience 1`, **Run**: the rows turn to about +10 dB C80, T30 about 1.0–1.2 s. `Acoustics.Amphitheatre.Velarium 1` adds the absorbing ring at 18 m — a small change.
+
+![amphitheatre with audience](../milestones/img/M10_heatmap_audience.png)
+
+Details and the full tables (experiment E5, and E1 on the shoebox): [12](12-amphitheatre-and-soundwalk.md).
+
+## 12. What is next
+
+- **Soundwalk (S5)**, the industry levels rebuilt on the amphitheatre, the remaining experiments of SPEC §5 ([12](12-amphitheatre-and-soundwalk.md#not-done-yet-planned)).
 - **Audio Tracing** listening and measurement on an RTX machine ([11](11-industry-comparison.md#how-to-run--listen)).

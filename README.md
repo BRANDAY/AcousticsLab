@@ -25,7 +25,7 @@ The aim is to understand the methods by building them and to be able to show the
 | Thread-level parallelization of the beam-tree build, BVH on/off, speed-up benchmark | **S3** | M7 | 1.3 Thread-level parallelization (benchmark); key B in scene levels | done ([M7](docs/milestones/M7.md)) |
 | Hybrid beam/ray tracing: beams for the early specular part, rays for the rest; three-curve comparison panel; missed-reflection count | **S4** | M8 | 1.4 Hybrid beam/ray tracing, 3. Compare; key H in scene levels, key 4 | done ([M8](docs/milestones/M8.md)) |
 | Steam Audio and Audio Tracing on the same positions, runtime switch, click-response measurement into the Compare table | — | M9 | 2.1 / 2.2 Industry; keys 5 / 6 | Steam Audio done (on a stand-in arena floor); Audio Tracing prepared, not yet heard — needs hardware ray tracing ([M9](docs/milestones/M9.md)) |
-| Amphitheatre (empty / audience / velarium), soundwalk, experiments of SPEC §5 | S4, **S5** | M10 | 1.1 Amphitheatre, 1.5 Audio AR soundwalk | in progress |
+| Amphitheatre (empty / audience / velarium), cavea heatmap, experiments of SPEC §5; soundwalk | S4, **S5** | M10 | 1.1 Amphitheatre; 1.5 Audio AR soundwalk | partly done: amphitheatre, audience / velarium, heatmap, experiments E1 and E5 ([M10](docs/milestones/M10.md)); soundwalk and the industry levels on the amphitheatre planned |
 
 Papers (full citations in [docs/guide/references.md](docs/guide/references.md)):
 S1 Sikora, Mateljan, Bogunović, *Beam Division in Acoustic Simulation of Non-Homogenous Environments*, Automatika 52(4), 2011 ·
@@ -43,6 +43,7 @@ S6 Đerek, Sikora, Pauković, Kraljević, *Acoustic Analysis of Various Purposes
 - **Beam tracer vs image sources**: the same early reflections up to order 3 at four receivers, **delays within 0.1 ms, energies within 1 %**, with no escaped or unresolved beam pieces. [Details](docs/guide/07-image-sources-and-beam-tracing.md#validation)
 - **Refraction**: Snell angles to 1e-9°, critical angle air → water 13.40°, $R + T = 1$ for every medium pair, the transmitted arrival under water at $h_{air}/c_{air} + h_{water}/c_{water}$ within 0.1 ms, and on S2's acoustic lens (scaled × 10) a focal receiver with more than twice the energy of receivers 0.3 m off the axis. [Details](docs/guide/08-refraction.md#validation)
 - **Hybrid**: T30 of the hybrid equals the pure ray tracer's to the millisecond, the early specular energy of beams and rays agrees within 1–2 %, nothing is counted twice; with fewer than about 16 000 rays the pure ray tracer misses some of the 24 early reflections of order ≤ 2 (250 rays: 20 missed at R1), the hybrid never does. [Details](docs/guide/10-hybrid.md#results)
+- **Diffuse-field limit** (experiment E1): over α = 0.05 … 0.5 the ray-traced T30 stays within +0.3 … +12.8 % of Eyring with Lambert walls; with nearly specular walls it is +4 … +58 % above, as expected for a non-diffuse field. [Table](docs/guide/12-amphitheatre-and-soundwalk.md#experiment-e1--shoebox-t30-against-sabine--eyring-over-α-spec-51)
 - **Determinism**: ray, beam and hybrid results are bit-identical for any thread count and with BVH on or off.
 
 All tests: [validation at a glance](docs/guide/README.md#validation-at-a-glance).
@@ -79,11 +80,11 @@ The menu:
 ACOUSTICS LAB
 1. Methods of M. Sikora
    1.1 Image sources & beam tracing - Shoebox        Level_Shoebox
-   1.1 Image sources & beam tracing - Amphitheatre   Level_Amphitheatre (arena-floor stand-in; M10)
+   1.1 Image sources & beam tracing - Amphitheatre   Level_Amphitheatre
    1.2 Beam tracing with refraction                  Level_Refraction
    1.3 Thread-level parallelization (benchmark)      Level_Shoebox, benchmark panel
    1.4 Hybrid beam/ray tracing                       Level_Shoebox, comparison panel
-   1.5 Audio AR soundwalk (optional)                 Level_Amphitheatre (M10)
+   1.5 Audio AR soundwalk (optional)                 Level_Amphitheatre (soundwalk planned)
 2. Industry
    2.1 Steam Audio (Valve)                           Level_Amphitheatre_SteamAudio
    2.2 Audio Tracing (Pinpoint, Fab)                 Level_Amphitheatre_AudioTracing (needs RTX)
@@ -102,6 +103,8 @@ Quit
 | Beams to an underwater receiver refracted at the water surface | S2's acoustic lens (× 10): beams converging in a rubber sphere in glycerol | Convolution auralization, receiver R3 |
 | ![hybrid comparison panel](docs/guide/img/hybrid_compare.png) | ![20 rays miss the early reflections](docs/milestones/img/M8_compare_20rays.png) | ![Steam Audio level](docs/milestones/img/M9_steamaudio_pie.png) |
 | Hybrid: pure ray (blue), pure beam ≤ 2 (orange), hybrid (green) and the metrics table | Compare with 20 rays: the rays miss all 24 early reflections, the beams do not | Steam Audio level (stand-in arena floor), plugin state on the HUD |
+| ![amphitheatre, empty](docs/milestones/img/M10_heatmap_empty.png) | ![amphitheatre, audience](docs/milestones/img/M10_heatmap_audience.png) | ![amphitheatre, velarium](docs/milestones/img/M10_heatmap_velarium.png) |
+| Amphitheatre, empty stone: C80 over the 20 rows | With audience (α 0.7): C80 about +10 dB on every row | With the velarium ring at 18 m |
 
 More screenshots in the guide; the ones still to take are listed in [SCREENSHOTS_TODO](docs/guide/SCREENSHOTS_TODO.md).
 
@@ -122,7 +125,8 @@ From the specification (SPEC §6) and the deviations recorded in the milestone d
 - **Auralization**: a synthetic placeholder clip until a real anechoic recording is added; the listener is the selected receiver (the clip is not spatialized); per-response loudness normalization.
 - **Geometry** is read from render data: editor, PIE and standalone-from-editor work; a packaged build would need meshes with CPU access.
 - **Hybrid** = two solvers combined in the histogram and split by path class (early specular ≤ K and ≤ t_mix from beams, the rest from rays), not S4's conversion of each beam into one ray; its beams are omnidirectional and do not refract. Validated on the shoebox.
-- **Industry levels** use a stand-in arena floor until the amphitheatre geometry of M10 is in them; plugin responses are compared through a recorded click (no impulse-response API). Audio Tracing is prepared but has not been heard: the development machine (GTX 1050 Ti) has no hardware ray tracing.
+- **Amphitheatre** is idealised: bare stepped rows (no seats, openings or façade), audience as a material swap, velarium as a flat ring, open top. The empty stone amphitheatre gives no measurable T30 within 3 s (energy circulating along the risers) — a known issue under investigation.
+- **Industry levels** still use the M9 stand-in arena floor (the amphitheatre is not in them yet); plugin responses are compared through a recorded click (no impulse-response API). Audio Tracing is prepared but has not been heard: the development machine (GTX 1050 Ti) has no hardware ray tracing.
 - **Menu modes** (`?mode=`): `Benchmark` (1.3) opens the benchmark panel, `Hybrid` (1.4) and `Compare` (3) the comparison panel; the others are informational. The panel's last settings carry over between levels within a session.
 
 ## Roadmap
@@ -130,7 +134,8 @@ From the specification (SPEC §6) and the deviations recorded in the milestone d
 - **M7 — thread-level parallelization (S3)**, done: one beam subtree per root beam on a dedicated `FQueuedThreadPool`, merged in root order (bit-identical for any thread count), BVH on/off, benchmark panel with CSV export and speed-up chart; on a 6-core / 12-thread laptop about 4× on the shoebox and the lens scene. [docs/milestones/M7.md](docs/milestones/M7.md)
 - **M8 — hybrid beam/ray (S4)**, done: beams for the early specular part, rays for the rest, split by path class; comparison panel with three IR curves, a metrics table and the missed-reflection count; key 4, key H. [docs/milestones/M8.md](docs/milestones/M8.md)
 - **M9 — industry**, done for Steam Audio: Steam Audio 4.8.1 built from source, two industry levels with a runtime switch (keys 5 / 6), click-response measurement into the Compare table; Audio Tracing prepared for an RTX machine. Also: Stop now cancels long ray runs within about a second. [docs/milestones/M9.md](docs/milestones/M9.md)
-- **M10 — amphitheatre and polish** (in progress): the elliptical amphitheatre with audience / velarium options, soundwalk mode, the experiments of SPEC §5 with tables, a full menu pass.
+- **M10 — amphitheatre** (fast pass done): the elliptical amphitheatre (65 × 40 m arena, 20 rows, 15 m) built from dynamic meshes, audience / velarium toggles, a 856-point heatmap over the cavea, experiments E1 (T30 vs Sabine / Eyring over α) and E5 (empty / audience / velarium) with CSVs in `docs/results`. [docs/milestones/M10.md](docs/milestones/M10.md)
+- **Next**: soundwalk mode (1.5), the industry levels rebuilt on the amphitheatre and Audio Tracing on an RTX machine, experiments §5.2–5.4 and §5.6, tests for the amphitheatre builder, a menu and polish pass.
 
 ## Repository layout
 
@@ -139,4 +144,4 @@ From the specification (SPEC §6) and the deviations recorded in the milestone d
 - `Content/Maps` — `Level_MainMenu`, `Level_Shoebox`, `Level_Refraction`, `Level_Amphitheatre`, `Level_Amphitheatre_SteamAudio`, `Level_Amphitheatre_AudioTracing`.
 - `Tools/` — editor scripts (content creation and PIE verification through the editor's MCP server), the anechoic test-signal generator, the Steam Audio installer (`Tools/Plugins`).
 - `Plugins/SteamAudio` — created by the installer, not in the repository.
-- `docs/guide` — the reviewer's guide · `docs/milestones` — what each milestone did, deviations, build and test logs · [`docs/SPEC.md`](docs/SPEC.md) — the specification (Russian) · [`docs/PROMPTS.md`](docs/PROMPTS.md) — milestone prompts · [`CLAUDE.md`](CLAUDE.md) — rules for the AI coding assistant used to build the project.
+- `docs/guide` — the reviewer's guide · `docs/results` — experiment CSVs · `docs/milestones` — what each milestone did, deviations, build and test logs · [`docs/SPEC.md`](docs/SPEC.md) — the specification (Russian) · [`docs/PROMPTS.md`](docs/PROMPTS.md) — milestone prompts · [`CLAUDE.md`](CLAUDE.md) — rules for the AI coding assistant used to build the project.

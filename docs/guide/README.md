@@ -19,7 +19,7 @@ This guide explains, mode by mode, how the methods of prof. Marjan Sikora's pape
 | 9 | [Thread-level parallelization](09-parallelization.md) | **S3** | M7 | done |
 | 10 | [Hybrid beam/ray tracing](10-hybrid.md) | **S4** | M8 | done |
 | 11 | [Industry comparison: Steam Audio, Audio Tracing](11-industry-comparison.md) | — | M9 | Steam Audio done; Audio Tracing prepared (needs RTX) |
-| 12 | [Amphitheatre and soundwalk](12-amphitheatre-and-soundwalk.md) | S4, **S5** | M10 | in progress |
+| 12 | [Amphitheatre and soundwalk](12-amphitheatre-and-soundwalk.md) | S4, **S5** | M10 | amphitheatre and experiments done; soundwalk planned |
 | — | [References](references.md) | S1–S6 with full citations | | |
 | — | [Screenshots still to take](SCREENSHOTS_TODO.md) | | | |
 
@@ -27,7 +27,7 @@ The milestone documents in [`docs/milestones/`](../milestones/) hold the develop
 
 ## Validation at a glance
 
-38 automation tests, all green on the M9 build (`AcousticsLab.*`, headless command in [CLAUDE.md](../../CLAUDE.md)).
+38 automation tests, all green on the M9 and M10 builds (`AcousticsLab.*`, headless command in [CLAUDE.md](../../CLAUDE.md)).
 
 | Test | What it checks | Tolerance / criterion | Page |
 |---|---|---|---|
