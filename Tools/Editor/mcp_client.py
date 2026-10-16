@@ -1,6 +1,6 @@
 """Minimal JSON-RPC client for the editor's Model Context Protocol server (Streamable HTTP, UE 5.8).
 
-Use it when Claude Code's own unreal-mcp connector is not connected (it only connects at session start),
+Use it when the IDE's unreal-mcp connector is not connected (it only connects at session start),
 e.g. after relaunching the editor:
 
     UnrealEditor.exe AcousticsLab.uproject /Game/Maps/Level_Shoebox -ModelContextProtocolStartServer -ModelContextProtocolPort=8000

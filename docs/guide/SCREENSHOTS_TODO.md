@@ -4,7 +4,7 @@
 
 The guide currently uses the milestone screenshots in [`docs/milestones/img`](../milestones/img) and a few crops in [`img/`](img) (main menu, benchmark panel, the M5 beam view). The rest is captured in **one pass after M10**, when all panels are final. New files go to `docs/guide/img/` with the names below; then replace the links in the pages named in the last column.
 
-## How to capture (recipes in [`docs/ENV.md`](../ENV.md))
+## How to capture
 
 - Start the editor with the MCP server: `UnrealEditor.exe AcousticsLab.uproject /Game/Maps/<Level> -ModelContextProtocolStartServer -ModelContextProtocolPort=8000`.
 - Place the camera before PIE by moving the `PlayerStart` (`ActorTools.set_actor_transform`, location in cm, rotation in degrees); the PIE pawn spawns there. Visualizer settings for a shot are set on the editor actor before `StartPIE` (`ObjectTools.set_properties` on `<manager>.BeamVisualizer` etc.); restore and save afterwards.

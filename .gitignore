@@ -28,10 +28,6 @@ Plugins/**/Intermediate/
 secrets/
 docs/ENV.local.md
 
-# Ruflo local state (memory databases, hook state)
-.swarm/
-.claude-flow/
-
 # Python cache from editor scripts
 __pycache__/
 
