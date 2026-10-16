@@ -38,7 +38,7 @@ Done: `main_menu.png` (PIE of `Level_MainMenu`), `benchmark_panel.png` (crop of 
 |---|---|---|---|---|
 | 15 | ~~`hybrid_compare.png`~~ | M8 | done (crop of `M8_compare_early.png`) | [10](10-hybrid.md) |
 | 16 | `industry_steam.png` (on the M10 cavea, viewport only), `industry_audiotracing.png` (**RTX machine only**), `compare_table.png` (comparison panel with filled SteamAud / AudioTr columns after `Acoustics.Industry.MeasureClick`) | M9 | the two plugin levels and the Compare table; until then [11](11-industry-comparison.md) uses `M9_steamaudio_pie.png` / `M9_audiotracing_pie.png` | [11](11-industry-comparison.md) |
-| 17 | `amphitheatre_overview.png`, `amphitheatre_c80_rows.png`, `soundwalk.png` | M10 | the amphitheatre, C80 per row (empty / audience / velarium), the soundwalk HUD | [12](12-amphitheatre-and-soundwalk.md) |
+| 17 | covered by `M10_heatmap_{empty,audience,velarium}.png` and `M10_soundwalk.png` in docs/milestones/img | M10 | the amphitheatre, C80 per row (empty / audience / velarium), the soundwalk HUD | [12](12-amphitheatre-and-soundwalk.md) |
 | 18 | a short GIF of the walkthrough (menu → shoebox run → beams → lens) | M10 | for the README | README |
 
 ## Notes on the existing screenshots

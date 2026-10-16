@@ -37,13 +37,13 @@ The project starts in `Level_MainMenu` ("ACOUSTICS LAB — Geometric acoustics a
 |---|---|---|---|---|
 | **1. Methods of M. Sikora** | | | | |
 | 1.1 Image sources & beam tracing - Shoebox | `Level_Shoebox` | Beam | the full bench: ray tracer, image sources, beam tracer, metrics, heatmap, auralization | [3](03-stochastic-ray-tracing.md)–[7](07-image-sources-and-beam-tracing.md) |
-| 1.1 Image sources & beam tracing - Amphitheatre | `Level_Amphitheatre` | Beam | the elliptical amphitheatre, audience / velarium toggles, C80 heatmap over the cavea; the ray tracer runs on start | [12](12-amphitheatre-and-soundwalk.md) |
+| 1.1 Image sources & beam tracing - Amphitheatre | `Level_Amphitheatre` | Beam | the elliptical amphitheatre, audience / velarium toggles, C80 heatmap over 856 cavea receivers; the ray tracer runs on start (100 000 rays) | [12](12-amphitheatre-and-soundwalk.md) |
 | 1.2 Beam tracing with refraction | `Level_Refraction` | Refraction | pool and acoustic lens | [8](08-refraction.md) |
 | 1.3 Thread-level parallelization (benchmark) | `Level_Shoebox` | Benchmark | the benchmark panel (thread pool, BVH on/off, speed-up chart) | [9](09-parallelization.md) |
 | 1.4 Hybrid beam/ray tracing | `Level_Shoebox` | Hybrid | the comparison panel: pure ray / pure beam ≤ K / hybrid | [10](10-hybrid.md) |
-| 1.5 Audio AR soundwalk (optional) | `Level_Amphitheatre` | Soundwalk | the same level; the soundwalk mode is planned | [12](12-amphitheatre-and-soundwalk.md) |
+| 1.5 Audio AR soundwalk (optional) | `Level_Amphitheatre` | Soundwalk | walk the rows on foot; the response of the nearest cavea cell follows you; ambient sources (N) | [12](12-amphitheatre-and-soundwalk.md) |
 | **2. Industry** | | | | |
-| 2.1 Steam Audio (Valve) | `Level_Amphitheatre_SteamAudio` | SteamAudio | Steam Audio rendering at R1–R4 (stand-in arena floor), keys 5 / 6 | [11](11-industry-comparison.md) |
+| 2.1 Steam Audio (Valve) | `Level_Amphitheatre_SteamAudio` | SteamAudio | Steam Audio rendering at R1–R4 on the baked amphitheatre, keys 5 / 6 | [11](11-industry-comparison.md) |
 | 2.2 Audio Tracing (Pinpoint, Fab) | `Level_Amphitheatre_AudioTracing` | AudioTracing | the same level starting with Audio Tracing (needs the plugin and an RTX GPU) | [11](11-industry-comparison.md) |
 | **3. Compare** | | | | |
 | Metrics table & A/B listening | `Level_Shoebox` | Compare | the comparison panel (table with ray / beam / hybrid and the industry columns, A/B 1–4) | [10](10-hybrid.md), [11](11-industry-comparison.md) |
@@ -69,6 +69,8 @@ Run it as **Standalone Game** (Play dropdown → Standalone Game) to use Esc →
 | **H** | switch between the simulation panel and the comparison panel (scene levels) |
 | **B** | switch between the simulation panel and the benchmark panel (scene levels) |
 | **Esc** | back to the main menu (Standalone) |
+
+**Soundwalk (menu 1.5)** has its own keys: WASD + mouse walk, **Space** jumps, **Tab** shows the panel and the cursor, **1** / **2** Dry / Ray, **N** toggles the ambient sources ([12](12-amphitheatre-and-soundwalk.md#soundwalk-menu-15)).
 
 The camera is a flying first-person pawn (6 m/s, collides with the walls). The top-left HUD line shows `<level> - <description> | mode: <mode> | A/B variant: <n (name)>` and the key hints of the current mode.
 
@@ -111,4 +113,4 @@ Select `SimulationManager` in a level → Details:
 
 ## Automated tests
 
-38 automation tests, all named `AcousticsLab.Core.<Area>.<Case>`; they run headless or from Tools → Session Frontend → Automation (filter `AcousticsLab`). The full list with tolerances is in the [guide index](README.md#validation-at-a-glance).
+41 automation tests, all named `AcousticsLab.Core.<Area>.<Case>`; they run headless or from Tools → Session Frontend → Automation (filter `AcousticsLab`). The full list with tolerances is in the [guide index](README.md#validation-at-a-glance).

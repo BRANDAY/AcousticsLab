@@ -10,7 +10,7 @@ A guided tour of what the bench shows today (milestones M0–M10), in the order 
 
 ## 1. The menu (30 s)
 
-Play as **Standalone Game**. The menu mirrors the structure of the work: **1. Methods of M. Sikora** (one entry per paper), **2. Industry** (Steam Audio, Audio Tracing), **3. Compare** (the hybrid comparison panel with the industry columns). 1.1 Amphitheatre is step 11; 1.5 soundwalk is still planned. Esc comes back.
+Play as **Standalone Game**. The menu mirrors the structure of the work: **1. Methods of M. Sikora** (one entry per paper), **2. Industry** (Steam Audio, Audio Tracing), **3. Compare** (the hybrid comparison panel with the industry columns). 1.1 Amphitheatre is step 11, 1.5 soundwalk step 12. Esc comes back.
 
 ![main menu](img/main_menu.png)
 
@@ -103,7 +103,7 @@ Details: [10. hybrid](10-hybrid.md) — including why the split is made per path
 
 Esc → **2.1 Steam Audio (Valve)**. With headphones: the test signal from the arena centre, rendered binaurally by Steam Audio 4.8.1 at R1 (20.4 m). HUD line 3 shows the plugin state. Console `Acoustics.Industry.Receiver R3` moves the listener to the last row; keys **1–4** go back to the bench's own convolution, **5** / **6** to the plugins.
 
-At this stage the industry levels contain only a stand-in arena floor (the amphitheatre is M10), so the click-measured metrics in the Compare table are a pipeline check, not a result. **Audio Tracing** (2.2) is prepared but needs a GPU with hardware ray tracing; on the development machine (GTX 1050 Ti) it cannot be heard.
+The level holds the empty stone amphitheatre of step 11. Press **2** or **4** after a run for the bench's own response at the same seat: Steam Audio sounds much drier (C80 about 23 dB at R1 against about −1 dB from the bench's ray tracer — experiment E6). **Audio Tracing** (2.2) is prepared but needs a GPU with hardware ray tracing; on the development machine (GTX 1050 Ti) it cannot be heard.
 
 Details: [11. industry comparison](11-industry-comparison.md).
 
@@ -111,14 +111,19 @@ Details: [11. industry comparison](11-industry-comparison.md).
 
 Esc → **1.1 Image sources & beam tracing - Amphitheatre**. An elliptical amphitheatre (arena 65 × 40 m, 20 stone rows up to 15 m); the ray tracer runs on start and the C80 heatmap colours 856 receivers on the rows.
 
-1. Read R1 in the panel (20.4 m from the source in the arena): C80 around 0 dB, T30 n/a — in the empty stone cavea the energy keeps circulating along the risers for longer than the 3 s histogram (a known issue of the idealised geometry).
+1. Read R1 in the panel (20.4 m from the source in the arena): C80 around 0 dB, T30 n/a — the empty stone cavea answers with a few strong specular echoes off its concave risers, not with a decay (experiment E5b).
 2. Console `Acoustics.Amphitheatre.Audience 1`, **Run**: the rows turn to about +10 dB C80, T30 about 1.0–1.2 s. `Acoustics.Amphitheatre.Velarium 1` adds the absorbing ring at 18 m — a small change.
 
 ![amphitheatre with audience](../milestones/img/M10_heatmap_audience.png)
 
-Details and the full tables (experiment E5, and E1 on the shoebox): [12](12-amphitheatre-and-soundwalk.md).
+Details and the tables of experiments E1–E6: [12](12-amphitheatre-and-soundwalk.md).
 
-## 12. What is next
+## 12. Soundwalk (1 min)
 
-- **Soundwalk (S5)**, the industry levels rebuilt on the amphitheatre, the remaining experiments of SPEC §5 ([12](12-amphitheatre-and-soundwalk.md#not-done-yet-planned)).
+Esc → **1.5 Audio AR soundwalk**. You stand on row 10 facing the arena; the clip plays through the response of the cavea cell nearest to you. Walk up and down the rows (WASD + mouse, Space jumps): the green HUD line names the cell you hear, its distance and C80, and the sound changes with it — no new simulation, each response comes from the stored result. **N** adds the ambient sources (crowd, birds, wind), **1** / **2** switch Dry / Ray, **Tab** shows the panel.
+
+Details: [12](12-amphitheatre-and-soundwalk.md#soundwalk-menu-15).
+
+## 13. What is next
+
 - **Audio Tracing** listening and measurement on an RTX machine ([11](11-industry-comparison.md#how-to-run--listen)).

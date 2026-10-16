@@ -43,7 +43,7 @@ The peak is the direct sound (distance / 343 m/s); the sum of squares is the tai
 - The preset sits on the submix `SM_Auralization` (wet 0 dB, dry −96 dB). The anechoic clip has `SM_Auralization` as its base submix and plays **2D** (not spatialized): the response already contains the direct sound and the 1/d² attenuation of the selected receiver, so the listener is the selected receiver, not the camera.
 - Loudness is normalized per response, `NormalizationVolumeDb = −10 log10(Σ h²)`, so the convolved clip has about the loudness of the dry clip whatever the room. Listen for clarity and distance, not for level.
 - **A/B is a mix switch**: Dry sets the submix dry level 1 / wet 0, the solver variants set 0 / 1 (`USoundSubmix::SetSubmixDryLevel / SetSubmixWetLevel`). The convolution keeps running in both states, so switching is instantaneous and click-free.
-- **Receiver switching does not rerun the solver.** All point receivers' responses are synthesized after a run and cached; `<` / `>` swaps the cached response within the same frame. This is the "moving receiver" property of beam tracing (S2: the beam tree is built once per source and only queried per receiver) applied to all solvers.
+- **Receiver switching does not rerun the solver.** All point receivers' responses are synthesized after a run and cached; `<` / `>` swaps the cached response within the same frame. This is the "moving receiver" property of beam tracing (S2: the beam tree is built once per source and only queried per receiver) applied to all solvers. Since M10 the response of **any** receiver of the result — including the 856 grid cells of the amphitheatre — is synthesized on demand from its histogram the first time it is selected (no WAV export; the 32 most recent are cached); this is what the soundwalk uses.
 
 ## Variants and keys
 
@@ -92,4 +92,4 @@ Headphones recommended; the clip is mono.
 - Noise is scaled per bin to the exact bin energy (stricter than "noise × √E" of SPEC §2.9).
 - Per-response loudness normalization instead of the engine default of −24 dB.
 - Broadband only: the six-band version will need band-filtered noise.
-- The listener is the selected receiver; the first-person "soundwalk" with the response following the camera is planned for M10 ([12-amphitheatre-and-soundwalk.md](12-amphitheatre-and-soundwalk.md)).
+- The listener is the selected receiver; in the soundwalk (menu 1.5) it is the grid cell nearest to the camera ([12](12-amphitheatre-and-soundwalk.md#soundwalk-menu-15)). The response is heard as a whole, without head direction.

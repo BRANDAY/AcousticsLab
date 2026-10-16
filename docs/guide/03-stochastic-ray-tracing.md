@@ -36,7 +36,7 @@ The solver keeps up to 2000 complete ray paths for the visualizer. They are **ev
 
 | Field on the panel | Setting | Default in `Level_Shoebox` | What changing it shows |
 |---|---|---|---|
-| Rays | `NumRays` | 20 000 | fewer rays → noisier late decay and grid heatmaps; more rays → smoother, slower (200 000 shows the progress bar and Stop) |
+| Rays | `NumRays` | 20 000 (`Level_Amphitheatre`: 100 000) | fewer rays → noisier late decay and grid heatmaps; more rays → smoother, slower (200 000 shows the progress bar and Stop). How many are enough (experiment E2): in the closed shoebox T30 is stable from 1 000 rays and C80 within 0.1–0.2 dB from 10 000–20 000; in the open amphitheatre ≥ 100 000–200 000 ([12](12-amphitheatre-and-soundwalk.md#experiment-e2--how-many-rays-spec-52)) |
 | Max order | `MaxOrder` | 500 (SPEC default 200) | below ~300 in the concrete room the rays stop before −35 dB and T30 becomes `n/a` |
 | Seed | `Seed` | 1 | another seed → a statistically equivalent but different result; same seed → identical |
 | Receiver r, m (0 = own) | `ReceiverRadius` | 0.50 | larger spheres catch more rays (less noise, more temporal smearing); 0 uses each receiver actor's own radius |

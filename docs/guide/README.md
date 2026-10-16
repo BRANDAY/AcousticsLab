@@ -19,7 +19,7 @@ This guide explains, mode by mode, how the methods of prof. Marjan Sikora's pape
 | 9 | [Thread-level parallelization](09-parallelization.md) | **S3** | M7 | done |
 | 10 | [Hybrid beam/ray tracing](10-hybrid.md) | **S4** | M8 | done |
 | 11 | [Industry comparison: Steam Audio, Audio Tracing](11-industry-comparison.md) | — | M9 | Steam Audio done; Audio Tracing prepared (needs RTX) |
-| 12 | [Amphitheatre and soundwalk](12-amphitheatre-and-soundwalk.md) | S4, **S5** | M10 | amphitheatre and experiments done; soundwalk planned |
+| 12 | [Amphitheatre and soundwalk](12-amphitheatre-and-soundwalk.md) | S4, **S5** | M10 | done (Audio Tracing column open) |
 | — | [References](references.md) | S1–S6 with full citations | | |
 | — | [Screenshots still to take](SCREENSHOTS_TODO.md) | | | |
 
@@ -27,7 +27,7 @@ The milestone documents in [`docs/milestones/`](../milestones/) hold the develop
 
 ## Validation at a glance
 
-38 automation tests, all green on the M9 and M10 builds (`AcousticsLab.*`, headless command in [Quick start](../../README.md#quick-start)).
+41 automation tests, all green on the final M10 build (`AcousticsLab.*`, headless command in [Quick start](../../README.md#quick-start)).
 
 | Test | What it checks | Tolerance / criterion | Page |
 |---|---|---|---|
@@ -69,8 +69,11 @@ The milestone documents in [`docs/milestones/`](../milestones/) hold the develop
 | `Core.Audio.ClickResponse` | recorded click → histogram and metrics (synthetic click) | onset, d/c, direct energy; T20 / T30 within 5 % | [11](11-industry-comparison.md) |
 | `Core.Levels.AmphitheatrePositions` | `DA_AmphitheatrePositions`: source and R1–R4 from the row parameters | 1e-6 … 1e-4 m | [11](11-industry-comparison.md) |
 | `Core.Industry.ComponentSpec` | plugin components from class paths; missing plugin; property import | exact | [11](11-industry-comparison.md) |
+| `Core.Amphitheatre.CaveaMesh` | 8 064 cavea triangles, closed shell, heights, semi-axes, volume and face areas; floor; velarium ring | areas / volume 1e-6 | [12](12-amphitheatre-and-soundwalk.md) |
+| `Core.Amphitheatre.RowsAndGrid` | row lookup, 856 grid points on their treads, R1–R4 on their rows, soundwalk nearest-cell search | exact / within half a cell | [12](12-amphitheatre-and-soundwalk.md) |
+| `Core.Amphitheatre.ActorExtraction` | the actor through the real extractor: triangles, materials, audience / velarium toggles | exact counts, area | [12](12-amphitheatre-and-soundwalk.md) |
 
-(All names start with `AcousticsLab.`; `ShoeboxExtraction`, `Visualization.Helpers`, `Levels.AmphitheatrePositions` and `Industry.ComponentSpec` live in the game module because they need engine types.)
+(All names start with `AcousticsLab.`; `ShoeboxExtraction`, `Visualization.Helpers`, `Levels.AmphitheatrePositions`, `Industry.ComponentSpec` and the three `Amphitheatre.*` tests live in the game module because they need engine types.)
 
 ## Known simplifications (summary)
 
@@ -80,7 +83,8 @@ The milestone documents in [`docs/milestones/`](../milestones/) hold the develop
 - **Only the beam tracer knows media**; the ray tracer and image sources treat interfaces as walls.
 - **No beam octree** for receiver lookup (linear scan of the tree); the parallel speed-up is limited by the largest root subtree.
 - **Hybrid** combines two solvers in the histogram, split by path class, instead of S4's conversion of each beam into one ray; its beams are omnidirectional and do not refract.
-- **Industry plugins**: stand-in arena floor until the M10 geometry; responses compared through a recorded click; Audio Tracing not yet heard (no hardware ray tracing on the development machine).
+- **Industry plugins**: responses compared through a recorded click; Steam Audio hears the empty cavea much drier than the bench (E6); Audio Tracing not yet heard (no hardware ray tracing on the development machine).
+- **Amphitheatre**: idealised bare rows, audience as a material swap, velarium as a flat ring, open top; the soundwalk's ambient sources are not convolved.
 - **Geometry from render data**: works in the editor, PIE and standalone-from-editor; a packaged build would need meshes with CPU access.
 - **Placeholder anechoic clip** (synthetic test signal) until a real anechoic recording is added.
 - Details and the reasons are on each page under "Differences".

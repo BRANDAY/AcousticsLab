@@ -1,6 +1,6 @@
 # 11. Industry comparison: Steam Audio and Audio Tracing
 
-[← Guide index](README.md) · Milestone M9 · Status: **done for Steam Audio; Audio Tracing prepared, needs an RTX machine** ([M9.md](../milestones/M9.md))
+[← Guide index](README.md) · Milestones M9, M10 · Status: **done for Steam Audio, on the amphitheatre since M10; Audio Tracing prepared, needs an RTX machine** ([M9.md](../milestones/M9.md), [M10.md](../milestones/M10.md#industry-levels-on-the-new-geometry))
 
 Menu: **2. Industry → 2.1 Steam Audio (Valve)** (`Level_Amphitheatre_SteamAudio`) and **2.2 Audio Tracing (Pinpoint, Fab)** (`Level_Amphitheatre_AudioTracing`). The two levels are identical except for which plugin starts; in both, keys **5** / **6** switch between the plugins during play. **3. Compare** opens the comparison panel of [10](10-hybrid.md), whose industry columns are filled from the plugins' click measurements.
 
@@ -39,7 +39,7 @@ The positions come from one data asset, `DA_AmphitheatrePositions` (SPEC §3.4),
 | R3 | row 20 (last), minor axis | (0, 35.6, 16.1) | 38.4 m |
 | R4 | row 10, major axis (side sector) | (40.1, 0, 8.6) | 40.7 m |
 
-**The industry levels still hold the M9 stand-in**: a 100 × 80 m concrete arena floor with the source and receivers. The amphitheatre now exists in `Level_Amphitheatre` (M10, [12](12-amphitheatre-and-soundwalk.md)), but the industry levels have not yet been regenerated on it (the content script needs the new `Stone` material, and Steam Audio's export of dynamic meshes is unchecked). Materials are mapped from the bench's presets: Concrete (α = 0.03, s = 0.1) → Steam Audio absorption 0.03 in its three bands and scattering 0.1; Audio Tracing reflection factor 0.97, scattering 0.1. Steam Audio's simulation settings are its defaults (real time: 1.0 s impulse response, 4 bounces, 4096 rays).
+**Geometry.** At M9 the levels held a stand-in (a 100 × 80 m arena floor). Since M10 they hold **the amphitheatre of [12](12-amphitheatre-and-soundwalk.md), baked into static meshes** (`SM_Amphitheatre_Floor`, `SM_Amphitheatre_Cavea`): Steam Audio exports only the static meshes of `AStaticMeshActor`s, so the content script converts the dynamic meshes and removes the builder actor from the copy. The exported Steam Audio scene grew from 1.4 KB (the floor plane) to 181 KB. The industry levels show the **empty stone** cavea (the reference condition); the audience / velarium toggles exist only in `Level_Amphitheatre`. Materials are mapped from the bench's presets: Stone (α = 0.02, s = 0.2) → `SAM_Stone`, absorption 0.02 in Steam Audio's three bands, scattering 0.2 (at M9: Concrete α 0.03, s 0.1); for Audio Tracing a reflection factor of 1 − α and the same scattering, applied once the plugin is installed. Steam Audio's simulation settings are its defaults (real time: 1.0 s impulse response, 4 bounces, 4096 rays).
 
 ## How it works
 
@@ -54,13 +54,15 @@ The positions come from one data asset, `DA_AmphitheatrePositions` (SPEC §3.4),
 - **Simulation panel**, block **Industry plugins**: buttons **5: Steam Audio** / **6: Audio Tracing** (highlighted while playing) and the active plugin's state: spatializer, source, listener receiver, warnings such as "hardware ray tracing OFF" or "spatializer not registered".
 - **Comparison panel** (H), columns **SteamAud** / **AudioTr**: the metrics of the last click measurement of each plugin; a plugin not yet measured shows "click".
 
-![Level_Amphitheatre_SteamAudio in PIE: arena floor stand-in, source S1, HUD line 3 with the Steam Audio state](../milestones/img/M9_steamaudio_pie.png)
+![Level_Amphitheatre_SteamAudio on the baked cavea: Steam Audio playing, a hybrid run in the panel](../milestones/img/M10_steamaudio_cavea.png)
+
+*`Level_Amphitheatre_SteamAudio` on the baked cavea (M10): Steam Audio playing (HUD line 3, block Industry plugins), and in the same level a hybrid run of the bench (R1: C80 −1.2 dB, EDT 3.46 s) with its C80 heatmap over the cavea. At M9 the level had only the floor: [M9_steamaudio_pie.png](../milestones/img/M9_steamaudio_pie.png).*
 
 ## Comparing responses: the click measurement
 
 Neither plugin exposes its impulse response, so the comparison is indirect (SPEC §3.8): `UClickResponseRecorder` plays a one-sample click at 48 kHz through the plugin source, records the master submix (`USoundSubmix::StartRecordingOutput / StopRecordingOutput`), and `FClickResponse` turns the recording into an energy histogram from the onset with the direct sound placed at $d/c$; the same metrics as for the bench's solvers follow ([4](04-room-acoustic-metrics.md)). WAVs go to `Saved/IR/<Level>_<Plugin>Click_R*.wav`.
 
-Steam Audio on the **stand-in arena floor** (16.10.2026, all four receivers):
+First measurement, at M9 on the **stand-in arena floor** (all four receivers):
 
 | R | distance | direct ($d/c$) | direct energy | T30 | C80 |
 |---|---|---|---|---|---|
@@ -69,13 +71,29 @@ Steam Audio on the **stand-in arena floor** (16.10.2026, all four receivers):
 | R3 | 38.4 m | 112.07 ms | 0.0260 | 0.112 s | 70.3 dB |
 | R4 | 40.7 m | 118.68 ms | 0.0211 | 0.133 s | 69.9 dB |
 
-**These numbers are a pipeline check, not an acoustic result**: with only the floor to reflect there is no reverberant tail (C80 around 70 dB, EDT not meaningful). They become comparable with the Sikora solvers once the industry levels are regenerated on the M10 cavea.
+**These numbers were a pipeline check, not an acoustic result**: with only the floor to reflect there is no reverberant tail (C80 around 70 dB). The measurement on the amphitheatre is experiment E6 below.
 
 The editor mutes PIE when its window is not focused; the recorder lifts that for the measurement (`bAllowBackgroundAudio`, `FApp::UnfocusedVolumeMultiplier`) and restores it afterwards.
 
+## Experiment E6 — the bench against Steam Audio on the cavea
+
+SPEC §5.6, PIE of `Level_Amphitheatre_SteamAudio` (baked cavea, empty stone): a hybrid run in the panel (100 000 rays + beams ≤ 2, subdivision level 2; the panel run took 12 s) and the click measurement of Steam Audio (real-time reflections, recorded master submix). Audio Tracing cannot run on the development GPU.
+
+| receiver | metric | pure ray | beam ≤ 2 | hybrid | Steam Audio (click) |
+|---|---|---|---|---|---|
+| R1 (20.4 m) | EDT | 3.50 s | 0.91 s | 3.46 s | 4.77 s |
+| R1 | C50 / C80 | −1.5 / −1.5 dB | 8.4 / 8.4 dB | −1.2 / −1.2 dB | 22.6 / 22.6 dB |
+| R1 | D50 | 0.41 | 0.87 | 0.43 | 0.99 |
+| R1 | T20 / T30 | n/a | n/a | n/a | 2.74 / 1.69 s |
+| R2 (28.5 m) | C80 / D50 | −1.9 dB / 0.39 | 10.4 dB / 0.92 | −1.9 dB / 0.39 | 24.1 dB / 1.00 |
+| R3 (38.4 m) | C80 / D50 | −2.5 dB / 0.36 | 5.1 dB / 0.76 | −2.5 dB / 0.36 | 28.5 dB / 1.00 |
+| R4 (40.7 m) | C80 / D50 | −0.6 dB / 0.47 | 100 dB (no late part) / 1.00 | −0.6 dB / 0.47 | 31.9 dB / 1.00 |
+
+Reading: **Steam Audio hears the empty amphitheatre as almost dry** (C80 23–32 dB, D50 ≈ 1; its T20 / T30 fits rest on a tail 50–60 dB below the direct sound, and EDT is undefined or absurd at R2–R4). The bench's ray tracer and hybrid hear the late specular echoes of the concave risers ([12, E5b](12-amphitheatre-and-soundwalk.md#e5b--why-the-empty-amphitheatre-has-no-t30)) and give C80 ≈ −2 … −1 dB. The ~25 dB difference is beyond tuning: Steam Audio runs with its default real-time settings (rays, duration, bounces) and its own energy model, and the echoes in the bench's result come from a few specular paths that a coarse stochastic budget does not resolve. The comparison is recorded as measured; the subjective A/B is in the level (keys 5 / 2 / 4). The hybrid's beam tree is truncated at the default budget of 500 000 nodes here (1.21 M needed), so its beam column is incomplete.
+
 ## How to run / listen
 
-1. Main menu → **2.1 Steam Audio** (or open `Level_Amphitheatre_SteamAudio` and Play). With headphones: the anechoic test signal from the arena centre, binaural, with the floor reflection.
+1. Main menu → **2.1 Steam Audio** (or open `Level_Amphitheatre_SteamAudio` and Play). With headphones: the anechoic test signal from the arena centre, binaural, in the empty stone cavea.
 2. Console: `Acoustics.Industry.Receiver R3` moves the listener to the last row (quieter, later), `R4` to the side sector; `Acoustics.Industry.State` prints the state.
 3. **5** / **6** switch plugins, **1–4** go back to the bench's own variants.
 4. `Acoustics.Industry.MeasureClick` (about 22 s): clicks at R1..R4 with the active plugin, metrics in the log and in the comparison panel (H).
@@ -97,6 +115,7 @@ In PIE (scripted, `Tools/Editor/verify_m9_pie.py`, `verify_m9_switch.ps1`): Stea
 ## Known limitations
 
 - **Audio Tracing has not been heard or measured yet**: plugin not installed on the development machine, and its GPU has no hardware ray tracing. Everything on the bench side is prepared; the RTX steps are above.
-- **Stand-in geometry** at M9 (floor only); the click metrics are not comparable with the bench's solvers until the cavea exists.
+- **Steam Audio hears the empty cavea almost dry** (E6), about 25 dB more clarity than the bench's tracers; its settings have not been tuned for open-air spaces (more rays, a longer response).
+- **Empty stone cavea only** in the industry levels (baked static meshes, no audience / velarium toggles).
 - **Indirect comparison**: plugin responses come from a recorded click on the master submix (binaural, plugin processing included), not from an impulse-response API.
-- Steam Audio runs with its default real-time settings (1 s, 4 bounces); raising them (2 s, 8 bounces) is noted for the amphitheatre.
+- Steam Audio runs with its default real-time settings (1 s, 4 bounces).

@@ -80,6 +80,15 @@ BVH gain (brute-force time / BVH time) at 1 thread: A 0.82×, B 2.06×, C 1.75×
 - **BVH gain.** With 12 triangles the BVH is slower than testing all of them (0.8–0.96×); with 768 triangles it gains about 2× single-threaded and with 2124 triangles about 2×. The gain is smaller than for ray tracing because the triangle search is only part of the work — the polygon clipping of the division and the receiver queries do not depend on it. Brute force scales better (B: 4.8× vs 2.9×) because its extra work is perfectly parallel arithmetic, so the two sources of speed-up do not multiply.
 - **Determinism** holds in every run, with and without refraction.
 
+**On the amphitheatre** (M10, experiment E4; 8 160 triangles, R1–R4, tree budget 2 M nodes, bit-identical for every thread count):
+
+| level / order | nodes | 1 thread | 12 threads | speed-up | BVH off, 1 thread | BVH gain |
+|---|---|---|---|---|---|---|
+| 2 / 2 | 1.21 M | 38.5 s (min 27.8) | 9.8 s (min 8.3) | 3.9× (best 4.0× at 8) | 109.1 s | 2.8× |
+| 3 / 1 | — | 6.9 s | 1.48 s | 4.7× | 19.0 s | 2.7× |
+
+The order-2 tree is memory-bound and stops scaling at 8 threads. Unlike the 12-triangle shoebox, the triangle search matters here: the BVH gives 2.7–2.8×. A tree cut by the node budget depends on the scheduling once the subtrees exceed twice the budget (logged as a warning); the benchmark options therefore expose `MaxBeamNodes`.
+
 ## Validation
 
 - `AcousticsLab.Core.Solvers.BeamThreadCountInvariance` — shoebox and a pool with refraction: the sequential tracer vs 1 / 2 / 4 / 12 pool threads and a second run on the same pool give a bit-identical tree, per-order counts, counters, histograms, arrivals and containing nodes; a node budget of 2/3 of the tree gives the same truncated tree for 1 and 4 threads, equal to the breadth-first prefix of the full tree.
