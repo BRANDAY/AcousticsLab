@@ -118,7 +118,7 @@ Reading the tables. With Lambert walls the simulated T30 sits 2–9 % above Eyri
 2. Press **Run**. The metric block fills for R1; the yellow reference block shows V, S, mean α, Sabine, Eyring and the T30 deviation.
 3. `<` / `>` switch to the other point receivers; the reference line follows.
 4. Type `0.1` into **Wall alpha override (0 = off)**, press Enter, **Run** again: Sabine 1.397 s, Eyring 1.326 s, T30 ≈ +13 % (specular concrete). To see the diffuse agreement, set `ShoeboxRoom → Material Name = Audience` (s = 0.6) before playing.
-5. Headless: the test command in [CLAUDE.md](../../CLAUDE.md) runs `SyntheticDecay` and `ShoeboxSabine` with the rest of the suite.
+5. Headless: the test command from [Quick start](../../README.md#quick-start) runs `SyntheticDecay` and `ShoeboxSabine` with the rest of the suite.
 
 ## Differences from the papers / SPEC
 

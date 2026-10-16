@@ -144,4 +144,4 @@ From the specification (SPEC §6) and the deviations recorded in the milestone d
 - `Content/Maps` — `Level_MainMenu`, `Level_Shoebox`, `Level_Refraction`, `Level_Amphitheatre`, `Level_Amphitheatre_SteamAudio`, `Level_Amphitheatre_AudioTracing`.
 - `Tools/` — editor scripts (content creation and PIE verification through the editor's MCP server), the anechoic test-signal generator, the Steam Audio installer (`Tools/Plugins`).
 - `Plugins/SteamAudio` — created by the installer, not in the repository.
-- `docs/guide` — the reviewer's guide · `docs/results` — experiment CSVs · `docs/milestones` — what each milestone did, deviations, build and test logs · [`docs/SPEC.md`](docs/SPEC.md) — the specification (Russian) · [`docs/PROMPTS.md`](docs/PROMPTS.md) — milestone prompts · [`CLAUDE.md`](CLAUDE.md) — rules for the AI coding assistant used to build the project.
+- `docs/guide` — the reviewer's guide · `docs/results` — experiment CSVs · `docs/milestones` — what each milestone did, deviations, build and test logs · [`docs/SPEC.md`](docs/SPEC.md) — the specification (Russian).

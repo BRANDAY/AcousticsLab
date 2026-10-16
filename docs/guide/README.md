@@ -27,7 +27,7 @@ The milestone documents in [`docs/milestones/`](../milestones/) hold the develop
 
 ## Validation at a glance
 
-38 automation tests, all green on the M9 and M10 builds (`AcousticsLab.*`, headless command in [CLAUDE.md](../../CLAUDE.md)).
+38 automation tests, all green on the M9 and M10 builds (`AcousticsLab.*`, headless command in [Quick start](../../README.md#quick-start)).
 
 | Test | What it checks | Tolerance / criterion | Page |
 |---|---|---|---|
