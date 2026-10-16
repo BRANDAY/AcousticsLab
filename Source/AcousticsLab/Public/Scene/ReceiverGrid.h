@@ -53,10 +53,29 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Acoustics")
 	TObjectPtr<UHeatmapComponent> Heatmap;
 
+	/**
+	 * Explicit tile centres in actor space, meters (M10: the amphitheatre rows). When not empty they replace the regular
+	 * NumTilesX x NumTilesY layout; the receiver of a tile sits ReceiverHeightMeters above its centre.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Acoustics|Custom tiles")
+	TArray<FVector> CustomTileCentersMeters;
+
+	/** Optional label per custom tile (the amphitheatre row), same order as CustomTileCentersMeters. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Acoustics|Custom tiles")
+	TArray<int32> CustomTileRows;
+
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 	UFUNCTION(BlueprintPure, Category = "Acoustics")
-	int32 NumTiles() const { return NumTilesX * NumTilesY; }
+	int32 NumTiles() const { return CustomTileCentersMeters.Num() > 0 ? CustomTileCentersMeters.Num() : NumTilesX * NumTilesY; }
+
+	bool HasCustomTiles() const { return CustomTileCentersMeters.Num() > 0; }
+
+	/** Switches to explicit tiles (TileSizeMeters = the tile edge) and rebuilds the heatmap. */
+	void SetCustomTiles(const TArray<FVector>& CentersMeters, const TArray<int32>& Rows, float InTileSizeMeters);
+
+	/** Row label of a custom tile (0 when there is none). */
+	int32 GetTileRow(int32 TileIndex) const { return CustomTileRows.IsValidIndex(TileIndex) ? CustomTileRows[TileIndex] : 0; }
 
 	/** World position of the receiver of a tile, meters. */
 	FVector3d GetReceiverPositionMeters(int32 TileIndex) const;

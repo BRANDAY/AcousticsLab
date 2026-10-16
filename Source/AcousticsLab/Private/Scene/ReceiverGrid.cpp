@@ -24,10 +24,32 @@ void AReceiverGrid::OnConstruction(const FTransform& Transform)
 
 void AReceiverGrid::RebuildTiles()
 {
-	if (Heatmap)
+	if (!Heatmap)
+	{
+		return;
+	}
+	if (HasCustomTiles())
+	{
+		TArray<FVector> CentersCm;
+		CentersCm.Reserve(CustomTileCentersMeters.Num());
+		for (const FVector& Center : CustomTileCentersMeters)
+		{
+			CentersCm.Add(Center * Acoustics::CentimetersPerMeter);
+		}
+		Heatmap->BuildTilesAt(CentersCm, TileSizeMeters, TileZOffsetMeters);
+	}
+	else
 	{
 		Heatmap->BuildTiles(NumTilesX, NumTilesY, TileSizeMeters, TileZOffsetMeters);
 	}
+}
+
+void AReceiverGrid::SetCustomTiles(const TArray<FVector>& CentersMeters, const TArray<int32>& Rows, float InTileSizeMeters)
+{
+	CustomTileCentersMeters = CentersMeters;
+	CustomTileRows = Rows;
+	TileSizeMeters = FMath::Clamp(InTileSizeMeters, 0.25f, 20.0f);
+	RebuildTiles();
 }
 
 void AReceiverGrid::BeginPlay()
@@ -41,12 +63,21 @@ FVector3d AReceiverGrid::GetReceiverPositionMeters(int32 TileIndex) const
 {
 	// From the grid's own settings, never from the component (its layout may lag behind in a freshly loaded world).
 	const float Cm = static_cast<float>(Acoustics::CentimetersPerMeter);
+	if (HasCustomTiles())
+	{
+		const FVector Center = CustomTileCentersMeters.IsValidIndex(TileIndex) ? CustomTileCentersMeters[TileIndex] : FVector::ZeroVector;
+		return FVector3d(GetActorTransform().TransformPosition((Center + FVector(0.0, 0.0, ReceiverHeightMeters)) * Cm)) / Acoustics::CentimetersPerMeter;
+	}
 	const FVector Local = UHeatmapComponent::TileLocalCenter(TileIndex, NumTilesX, NumTilesY, TileSizeMeters * Cm, ReceiverHeightMeters * Cm);
 	return FVector3d(GetActorTransform().TransformPosition(Local)) / Acoustics::CentimetersPerMeter;
 }
 
 FString AReceiverGrid::MakeReceiverName(int32 TileIndex) const
 {
+	if (HasCustomTiles())
+	{
+		return FString::Printf(TEXT("%s#%d(row %d)"), *GridId.ToString(), TileIndex, GetTileRow(TileIndex));
+	}
 	const int32 X = NumTilesX > 0 ? TileIndex % NumTilesX : 0;
 	const int32 Y = NumTilesX > 0 ? TileIndex / NumTilesX : 0;
 	return FString::Printf(TEXT("%s[%d,%d]"), *GridId.ToString(), X, Y);

@@ -131,13 +131,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Acoustics|Heatmap")
 	void BuildTiles(int32 NumX, int32 NumY, float TileSizeMeters, float ZOffsetMeters);
 
+	/** Explicit tile centres in component space, cm (M10 amphitheatre rows); empty = the regular grid. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Acoustics|Heatmap|State")
+	TArray<FVector> CustomCentersCm;
+
+	/** Lays out one tile of TileSizeMeters at every centre (cm, component space), ZOffsetMeters above it. */
+	void BuildTilesAt(const TArray<FVector>& CentersCm, float TileSizeMeters, float ZOffsetMeters);
+
 	/** Tile centre in component space, centimeters. */
 	FVector GetTileLocalCenter(int32 TileIndex) const;
 
 	/** Centre of tile TileIndex (= Y * NumX + X) of a NumX x NumY grid of StepCm centred on the origin, at ZCm. */
 	static FVector TileLocalCenter(int32 TileIndex, int32 NumX, int32 NumY, float StepCm, float ZCm);
 
-	int32 NumTiles() const { return NumTilesX * NumTilesY; }
+	int32 NumTiles() const { return CustomCentersCm.Num() > 0 ? CustomCentersCm.Num() : NumTilesX * NumTilesY; }
 
 	/** One sample per tile (tile order); fewer samples clear the rest. */
 	void SetSamples(const TArray<FHeatmapSample>& InSamples);

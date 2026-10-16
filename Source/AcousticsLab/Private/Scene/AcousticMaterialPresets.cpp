@@ -19,6 +19,7 @@ namespace AcousticMaterialPresets
 		// Built lazily: FName must not be constructed during static initialization.
 		static const TArray<FPreset> Presets = {
 			MakePreset(TEXT("Concrete"), 0.03, 0.10, false, FLinearColor(0.55f, 0.55f, 0.55f), TEXT("Concrete / stone (SPEC alpha 0.02-0.05). Default material.")),
+			MakePreset(TEXT("Stone"), 0.02, 0.20, false, FLinearColor(0.75f, 0.68f, 0.55f), TEXT("Limestone masonry of an ancient amphitheatre (SPEC alpha 0.02-0.05); stepped rows scatter (M10).")),
 			MakePreset(TEXT("Plaster"), 0.05, 0.10, false, FLinearColor(0.85f, 0.80f, 0.70f), TEXT("Plaster on masonry.")),
 			MakePreset(TEXT("Wood"), 0.10, 0.15, false, FLinearColor(0.55f, 0.35f, 0.15f), TEXT("Wood panelling / stage floor.")),
 			MakePreset(TEXT("Audience"), 0.70, 0.60, false, FLinearColor(0.60f, 0.10f, 0.10f), TEXT("Seated audience (SPEC 0.6-0.8); strongly scattering.")),

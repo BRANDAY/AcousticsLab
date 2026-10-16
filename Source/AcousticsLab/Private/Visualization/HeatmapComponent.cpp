@@ -128,12 +128,28 @@ FVector UHeatmapComponent::TileLocalCenter(int32 TileIndex, int32 NumX, int32 Nu
 
 FVector UHeatmapComponent::GetTileLocalCenter(int32 TileIndex) const
 {
+	if (CustomCentersCm.Num() > 0)
+	{
+		return CustomCentersCm.IsValidIndex(TileIndex) ? CustomCentersCm[TileIndex] + FVector(0.0, 0.0, TileZOffsetCm) : FVector::ZeroVector;
+	}
 	return TileLocalCenter(TileIndex, NumTilesX, NumTilesY, TileStepCm, TileZOffsetCm);
+}
+
+void UHeatmapComponent::BuildTilesAt(const TArray<FVector>& CentersCm, float TileSizeMeters, float ZOffsetMeters)
+{
+	const bool bSameCount = CentersCm.Num() == NumTiles();
+	CustomCentersCm = CentersCm;
+	const TArray<FHeatmapSample> Kept = Samples;
+	BuildTiles(CentersCm.Num(), 1, TileSizeMeters, ZOffsetMeters);
+	if (bSameCount && Kept.Num() > 0)
+	{
+		SetSamples(Kept);
+	}
 }
 
 void UHeatmapComponent::BuildTiles(int32 NumX, int32 NumY, float TileSizeMeters, float ZOffsetMeters)
 {
-	NumX = FMath::Clamp(NumX, 0, 1000);
+	NumX = FMath::Clamp(NumX, 0, CustomCentersCm.Num() > 0 ? 100000 : 1000);
 	NumY = FMath::Clamp(NumY, 0, 1000);
 	const bool bSameCount = NumX * NumY == NumTilesX * NumTilesY;
 	NumTilesX = NumX;
