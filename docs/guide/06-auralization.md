@@ -1,6 +1,6 @@
 # 6. Auralization: impulse-response synthesis, WAV export, convolution, A/B
 
-[← Guide index](README.md) · Milestone M4 (beam variant added in M5) · Status: **done** for Dry / Ray / Beam, **planned** for Hybrid (M8) and the two industry plugins (M9)
+[← Guide index](README.md) · Milestones M4 (beam variant added in M5, hybrid in M8, plugin switch in M9) · Status: **done** for Dry / Ray / Beam / Hybrid and Steam Audio; Audio Tracing prepared (needs hardware ray tracing)
 
 The bench lets you **hear** each solver: the energy response of the selected receiver is turned into a 48 kHz pressure impulse response, loaded into the engine's convolution reverb, and an anechoic clip is played through it. This is the listening side of the S4–S5 line of work (auralization of rooms and of archaeological sites); here it serves as an A/B check of the solvers.
 
@@ -52,17 +52,17 @@ The peak is the direct sound (distance / 343 m/s); the sum of squares is the tai
 | 1 | Dry | the clip as recorded | done |
 | 2 | Ray | response from the last ray-tracer run | done |
 | 3 | Beam | response from the last beam-tracer run (early reflections as exact impulses) | done |
-| 4 | Hybrid | hybrid beam/ray response | planned (M8) |
-| 5 | Steam Audio | plugin rendering in `Level_Amphitheatre_SteamAudio` | planned (M9) |
-| 6 | Audio Tracing | plugin rendering in `Level_Amphitheatre_AudioTracing` | planned (M9) |
+| 4 | Hybrid | response of the last hybrid run (beams early, rays late, [10](10-hybrid.md)); the same run also refreshes 2 = pure ray and 3 = pure beam ≤ K | done (M8) |
+| 5 | Steam Audio | the clip rendered by the plugin in the industry levels (binaural, listener at the selected receiver) | done (M9) |
+| 6 | Audio Tracing | the same with Audio Tracing | prepared; needs the plugin and a GPU with hardware ray tracing ([11](11-industry-comparison.md)) |
 
-Keys 4–6 are bound already and only log that there is no signal path yet. Key 2 or 3 before the corresponding solver has run logs "has no result yet" and keeps the current routing. The component keeps one synthesized set per solver, so after one ray run and one beam run, keys 2 and 3 switch between the two rooms instantly. Image-source results are not auralized (the panel says so); their early reflections reach the ear through the beam variant, which finds the same paths.
+Keys 5 and 6 stop the bench's convolution clip and play the plugin source; 1–4 return to the convolution. Outside the industry levels 5 / 6 only log "only in the industry levels". Key 2, 3 or 4 before the corresponding solver has run logs "has no result yet" and keeps the current routing. The component keeps one synthesized set per solver, so after one ray run and one beam run, keys 2 and 3 switch between the two rooms instantly. Image-source results are not auralized (the panel says so); their early reflections reach the ear through the beam variant, which finds the same paths.
 
 ## Panel: the "Auralization (convolution reverb)" block
 
 | Control | What it does |
 |---|---|
-| `1: Dry`, `2: Ray`, `3: Beam` | same as keys 1–3; the active variant is highlighted, variants without a response are greyed |
+| `1: Dry`, `2: Ray`, `3: Beam`, `4: Hybrid` | same as keys 1–4; the active variant is highlighted, variants without a response are greyed |
 | `Play`, `Stop` | start / stop the clip (it re-triggers itself with a 0.5 s gap, `LoopGapSeconds`) |
 | status lines | variant, receiver, clip state; which responses are cached; IR length, cut reason (−60 dB or T_max), peak, normalization; WAV path |
 

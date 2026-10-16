@@ -66,7 +66,7 @@ Tests: `AcousticsLab.Core.Geometry.RayTriangle`; `BvhMatchesBruteForce` (10 000 
 |---|---|
 | `Level_Shoebox` | `ShoeboxRoom` 10 × 7 × 3 m, Concrete, floor at z = 0, centred in XY; source `S1` (−3, −1.5, 1.5) m; receivers `R1` (3, 1.5, 1.5), `R2` (0, 2.5, 1.2), `R3` (−2, −1.5, 1.5) — 1 m in front of the source, `R4` (4.3, 2.8, 1.0) — far corner; `ReceiverGrid` G: 10 × 7 tiles of 1 m at 1.2 m height; `SimulationManager` |
 | `Level_Refraction` | pool 20 × 10 × 3 m with a water surface at 2 m, and 60 m away the acoustic lens of S2 scaled ×10; see [8. refraction](08-refraction.md) |
-| `Level_Amphitheatre`, `…_SteamAudio`, `…_AudioTracing` | placeholders until M9–M10 |
+| `Level_Amphitheatre`, `…_SteamAudio`, `…_AudioTracing` | arena-floor stand-in (M9) until the cavea of M10 |
 
 `AShoeboxRoomActor` exposes `Room Size Meters` and `Material Name`; changing them rebuilds the walls and the Sabine/Eyring reference follows.
 

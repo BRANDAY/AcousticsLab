@@ -13,13 +13,13 @@ This guide explains, mode by mode, how the methods of prof. Marjan Sikora's pape
 | 3 | [Stochastic ray tracing](03-stochastic-ray-tracing.md) | reference method of S2 / late part of S4 | M2, M3 | done |
 | 4 | [Room-acoustic metrics](04-room-acoustic-metrics.md) | metrics as in S6; Sabine / Eyring validation | M2 | done |
 | 5 | [Visualization: paths, heatmaps, IR plot](05-visualization.md) | — | M3, M5, M6 | done |
-| 6 | [Auralization: IR synthesis, convolution, A/B](06-auralization.md) | listening side of S4–S5 | M4, M5 | done (Dry / Ray / Beam) |
+| 6 | [Auralization: IR synthesis, convolution, A/B](06-auralization.md) | listening side of S4–S5 | M4, M5, M8, M9 | done (Dry / Ray / Beam / Hybrid, Steam Audio) |
 | 7 | [Image sources and beam tracing with beam division](07-image-sources-and-beam-tracing.md) | **S1**, S2 §3.2–3.3 | M5 | done |
 | 8 | [Beam tracing with refraction: pool and lens](08-refraction.md) | **S2** | M6 | done |
 | 9 | [Thread-level parallelization](09-parallelization.md) | **S3** | M7 | done |
-| 10 | [Hybrid beam/ray tracing](10-hybrid.md) | **S4** | M8 | planned |
-| 11 | [Industry comparison: Steam Audio, Audio Tracing](11-industry-comparison.md) | — | M9 | planned |
-| 12 | [Amphitheatre and soundwalk](12-amphitheatre-and-soundwalk.md) | S4, **S5** | M10 | planned |
+| 10 | [Hybrid beam/ray tracing](10-hybrid.md) | **S4** | M8 | done |
+| 11 | [Industry comparison: Steam Audio, Audio Tracing](11-industry-comparison.md) | — | M9 | Steam Audio done; Audio Tracing prepared (needs RTX) |
+| 12 | [Amphitheatre and soundwalk](12-amphitheatre-and-soundwalk.md) | S4, **S5** | M10 | in progress |
 | — | [References](references.md) | S1–S6 with full citations | | |
 | — | [Screenshots still to take](SCREENSHOTS_TODO.md) | | | |
 
@@ -27,7 +27,7 @@ The milestone documents in [`docs/milestones/`](../milestones/) hold the develop
 
 ## Validation at a glance
 
-30 automation tests, all green on the M7 build (`AcousticsLab.*`, headless command in [CLAUDE.md](../../CLAUDE.md)).
+38 automation tests, all green on the M9 build (`AcousticsLab.*`, headless command in [CLAUDE.md](../../CLAUDE.md)).
 
 | Test | What it checks | Tolerance / criterion | Page |
 |---|---|---|---|
@@ -61,8 +61,16 @@ The milestone documents in [`docs/milestones/`](../milestones/) hold the develop
 | `Core.Solvers.BvhToggleInvariance` | BVH on vs brute force for the beam tracer (shoebox, split shoebox, pool) | bit-identical | [9](09-parallelization.md) |
 | `Core.Solvers.BenchmarkMatrix` | benchmark matrix, summary, CSV, cancel | exact | [9](09-parallelization.md) |
 | `Core.Solvers.LensFocus` | S2 lens scaled × 10: focus energy vs off-axis and in front | **focus > 2 × off-axis**, > front | [8](08-refraction.md) |
+| `Core.Solvers.HybridConsistency` | hybrid vs pure ray (K = 2, t_mix 80 ms, s = 0.1 and 0.5): T30, early specular energy beams vs rays, bins after t_mix | **T30 equal to the ms**; early energy within 1–2 %; bins after t_mix identical | [10](10-hybrid.md) |
+| `Core.Solvers.HybridNoDoubleCounting` | late + excluded = independent ray run; beam and late-ray image sets disjoint; K = 3, t_mix 30 ms | bin by bin; none double, none lost | [10](10-hybrid.md) |
+| `Core.Solvers.HybridDeterminism` | hybrid / pure ray / pure beam for 1, 4, all threads and a repeat | bit-identical | [10](10-hybrid.md) |
+| `Core.Solvers.HybridMissedReflections` | SPEC §5 exp. 3: early reflections missed by 250 … 256 000 rays | beams find all 24; table on the page | [10](10-hybrid.md) |
+| `Core.Solvers.RayTracerCancel` | 5 M rays cancelled after 0.3 s; chunk count | cancelled, no result, returns in < 2 s; ≤ 128 chunks | [3](03-stochastic-ray-tracing.md) |
+| `Core.Audio.ClickResponse` | recorded click → histogram and metrics (synthetic click) | onset, d/c, direct energy; T20 / T30 within 5 % | [11](11-industry-comparison.md) |
+| `Core.Levels.AmphitheatrePositions` | `DA_AmphitheatrePositions`: source and R1–R4 from the row parameters | 1e-6 … 1e-4 m | [11](11-industry-comparison.md) |
+| `Core.Industry.ComponentSpec` | plugin components from class paths; missing plugin; property import | exact | [11](11-industry-comparison.md) |
 
-(All names start with `AcousticsLab.`; `ShoeboxExtraction` and `Visualization.Helpers` live in the game module because they need engine types.)
+(All names start with `AcousticsLab.`; `ShoeboxExtraction`, `Visualization.Helpers`, `Levels.AmphitheatrePositions` and `Industry.ComponentSpec` live in the game module because they need engine types.)
 
 ## Known simplifications (summary)
 
@@ -71,6 +79,8 @@ The milestone documents in [`docs/milestones/`](../milestones/) hold the develop
 - **Refracted beam apex**: least-squares point of the three refracted guide rays (S2 uses the mean of the pairwise intersections); R / T at normal incidence for every angle.
 - **Only the beam tracer knows media**; the ray tracer and image sources treat interfaces as walls.
 - **No beam octree** for receiver lookup (linear scan of the tree); the parallel speed-up is limited by the largest root subtree.
+- **Hybrid** combines two solvers in the histogram, split by path class, instead of S4's conversion of each beam into one ray; its beams are omnidirectional and do not refract.
+- **Industry plugins**: stand-in arena floor until the M10 geometry; responses compared through a recorded click; Audio Tracing not yet heard (no hardware ray tracing on the development machine).
 - **Geometry from render data**: works in the editor, PIE and standalone-from-editor; a packaged build would need meshes with CPU access.
 - **Placeholder anechoic clip** (synthetic test signal) until a real anechoic recording is added.
 - Details and the reasons are on each page under "Differences".

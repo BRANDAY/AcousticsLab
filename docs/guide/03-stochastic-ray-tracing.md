@@ -26,7 +26,7 @@ Code: `Source/AcousticsCore/Public/Solvers/RayTracer.h` (`FRayTracer`, `FRayTrac
 
 ### Determinism and threads
 
-Rays are processed in fixed chunks of 1024 with one histogram per chunk; chunks are summed in index order, and every ray has its own PCG32 random stream seeded from (seed, ray index). The result is therefore **bit-identical for any number of threads** (test `ThreadCountInvariance`) and reproducible for a given seed (test `Deterministic`: same seed → identical histogram, another seed → different).
+Rays are processed in fixed chunks of 1024 with one histogram per chunk (since M9 the chunk is enlarged for very large runs so that there are at most 128 chunks — it depends on the ray count only, so runs up to 131 072 rays are unchanged and results stay independent of the thread count); chunks are summed in index order, and every ray has its own PCG32 random stream seeded from (seed, ray index). The result is therefore **bit-identical for any number of threads** (test `ThreadCountInvariance`) and reproducible for a given seed (test `Deterministic`: same seed → identical histogram, another seed → different).
 
 ### Path samples for drawing
 
@@ -66,6 +66,7 @@ plus the metrics of the selected receiver ([4. metrics](04-room-acoustic-metrics
 - `AcousticsLab.Core.Solvers.RayTracerPrimitives` — Fibonacci directions, reflection, Lambert sampling, segment–sphere intersection.
 - `AcousticsLab.Core.Solvers.ShoeboxSabine` — T30 within 20 % of Eyring for α = 0.1 / 0.2 / 0.3 with diffuse walls; measured deviations +2.4 … +8.8 % (table in [4. metrics](04-room-acoustic-metrics.md)).
 - `Deterministic`, `ThreadCountInvariance`, `PathSampling` — see above.
+- `AcousticsLab.Core.Solvers.RayTracerCancel` (M9) — a 5 M-ray run cancelled after 0.3 s returns "cancelled" (no result) in under 2 s, with at most 128 chunks. The solver runs at background priority and checks for cancellation every 64 rays, so **Stop** works within about a second and the editor keeps drawing during long runs.
 
 ## Differences from the SPEC
 

@@ -2,7 +2,7 @@
 
 [← Guide index](README.md)
 
-A guided tour of what the bench shows today (milestones M0–M7), in the order a reviewer would want to see it. Each step names what to press, what to look at, and where the details are. Times are on the development machine (10 worker threads).
+A guided tour of what the bench shows today (milestones M0–M9), in the order a reviewer would want to see it. Each step names what to press, what to look at, and where the details are. Times are on the development machine (10 worker threads).
 
 **Before you start:** open `AcousticsLab.uproject` in Unreal Engine 5.8.3 (build instructions in the [README](../../README.md#quick-start)). Headphones help in step 5. Keys: **Tab** switches between the panel (cursor) and flying (WASD + mouse, E/Q up/down); **Esc** returns to the menu in Standalone mode.
 
@@ -10,7 +10,7 @@ A guided tour of what the bench shows today (milestones M0–M7), in the order a
 
 ## 1. The menu (30 s)
 
-Play as **Standalone Game**. The menu mirrors the structure of the work: **1. Methods of M. Sikora** (one entry per paper), **2. Industry** (Steam Audio, Audio Tracing — planned), **3. Compare** (planned). Items that are not built yet open a placeholder level; Esc comes back.
+Play as **Standalone Game**. The menu mirrors the structure of the work: **1. Methods of M. Sikora** (one entry per paper), **2. Industry** (Steam Audio, Audio Tracing), **3. Compare** (the hybrid comparison panel with the industry columns). The amphitheatre items (1.1 Amphitheatre, 1.5 soundwalk) belong to M10, in progress; Esc comes back.
 
 ![main menu](img/main_menu.png)
 
@@ -42,7 +42,7 @@ Details: [5. visualization](05-visualization.md).
 1. **Solver** = `ImageSource`, **Run** (≈ 0.02 s): `162 image sources` (orders 1–3), spheres coloured by order, polylines source → walls → R1 for every valid path. Press `>`: the paths switch to R2 instantly.
 2. **Solver** = `BeamTracer`, **Run** (≈ 0.2 s): `320 root beams, 22925 beam nodes`. Tick **Beams** and **Only with receiver**, slider **Order <=** to 3: the translucent beams that contain R1, and their parent beams back to the source. The receiver test is a point-in-beam query — no back-tracing — so all 74 receivers are answered from one beam tree.
 3. The two solvers find the same reflections: the test `BeamVsImageSource` requires equal sets of paths with **delays within 0.1 ms and energies within 1 %**.
-4. The IR plot shows discrete early arrivals; T30 is `n/a` and C80 = 100 dB because these solvers model only the early part — the motivation for the hybrid method (S4, planned).
+4. The IR plot shows discrete early arrivals; T30 is `n/a` and C80 = 100 dB because these solvers model only the early part — the motivation for the hybrid method (S4, step 9).
 
 ![beams containing R1](img/M5_beams_receiver_crop.png)
 
@@ -81,9 +81,33 @@ Esc → **1.2 Beam tracing with refraction**. The level's manager uses the beam 
 
 Details: [8. refraction](08-refraction.md).
 
-## 8. What is next
+## 8. Parallel beam tracing (1 min, optional)
 
-- **1.3 Thread-level parallelization (S3)** — done: the beam-tree build on a thread pool, a benchmark panel with a speed-up chart (about 4× on 6 cores, bit-identical results); 1 minute with the default settings ([9](09-parallelization.md)).
-- **1.4 Hybrid beam/ray tracing (S4)** — planned ([10](10-hybrid.md)).
-- **2. Industry** and **3. Compare** — the same amphitheatre in Steam Audio and Audio Tracing: planned ([11](11-industry-comparison.md)).
-- **Amphitheatre, audience/velarium, soundwalk (S5)** — planned ([12](12-amphitheatre-and-soundwalk.md)).
+Esc → **1.3 Thread-level parallelization (benchmark)**: the beam-tree build of S3 on a thread pool, a benchmark panel with a speed-up chart (about 4× on 6 cores, bit-identical results for any thread count); 1 minute with the default settings ([9](09-parallelization.md)).
+
+## 9. Hybrid: beams early, rays late (1.5 min)
+
+Esc → **1.4 Hybrid beam/ray tracing** (in PIE: `Level_Shoebox`, Play, **H**). The comparison panel opens at the top right.
+
+1. Keep K = 2, t_mix = 80 ms, Rays = 20000, Beam subdiv = 2, press **Run hybrid** (≈ 3 s).
+2. **0–200 ms**: the orange steps (pure beam ≤ 2) sit on the blue ray peaks up to 80 ms; the green hybrid follows the beams before t_mix and the rays after. **Full decay**: green and blue Schroeder curves coincide — T30 4.72 s for both.
+3. The line under the table: 24 early specular reflections at R1, all found by 20 000 rays; early energy beams vs rays +4.1 %.
+4. Set **Rays = 20**, run again: the rays find 0 of the 24 early reflections, the hybrid still has all of them (pure ray C50 −23.7 dB vs hybrid −14.2 dB). This is S4's argument in one number.
+5. Keys **1–4**: Dry / pure ray / pure beam ≤ K / hybrid.
+
+![hybrid comparison panel](img/hybrid_compare.png)
+
+Details: [10. hybrid](10-hybrid.md) — including why the split is made per path class and how it differs from S4's beam-to-ray conversion.
+
+## 10. Industry: Steam Audio (1 min)
+
+Esc → **2.1 Steam Audio (Valve)**. With headphones: the test signal from the arena centre, rendered binaurally by Steam Audio 4.8.1 at R1 (20.4 m). HUD line 3 shows the plugin state. Console `Acoustics.Industry.Receiver R3` moves the listener to the last row; keys **1–4** go back to the bench's own convolution, **5** / **6** to the plugins.
+
+At this stage the industry levels contain only a stand-in arena floor (the amphitheatre is M10), so the click-measured metrics in the Compare table are a pipeline check, not a result. **Audio Tracing** (2.2) is prepared but needs a GPU with hardware ray tracing; on the development machine (GTX 1050 Ti) it cannot be heard.
+
+Details: [11. industry comparison](11-industry-comparison.md).
+
+## 11. What is next
+
+- **Amphitheatre, audience / velarium, soundwalk (S5)** — M10, in progress ([12](12-amphitheatre-and-soundwalk.md)); the industry levels are regenerated on its geometry afterwards.
+- **Audio Tracing** listening and measurement on an RTX machine ([11](11-industry-comparison.md#how-to-run--listen)).
