@@ -17,7 +17,7 @@ The guide currently uses the milestone screenshots in [`docs/milestones/img`](..
 
 Done: `main_menu.png` (PIE of `Level_MainMenu`), `benchmark_panel.png` (crop of `M7_benchmark_panel.png`), `hybrid_compare.png` (crop of `M8_compare_early.png`), `imagesources_outside.png` (#5) and `heatmap_c80.png` (#13), captured 16.10.2026 after M10; `ir_plot_pinned.png` (#3), `auralization_block.png` (#11), `pool_side.png` (#8), `lens_R3.png` (#10), `compare_table.png` (#16), captured after the M10 follow-up.
 
-Tried and not used (16.10): #4 (after the ray run the plot spans 6 s and the pinned beam arrivals sit in the first 0.1 s), #6 / #7 (from inside the camera sits in an order-1 beam and the view is yellow; from outside the order 2–3 beams to R1 fill the box), #9 (from above the order-1 beams cover the pool). **#2 waits for a fix**: the current panel shows no settings rows (see the known issue in [01](01-overview-and-controls.md#the-simulation-panel)). Not attempted: #12 (needs a click on an editor Details button), #18 (GIF); `M10_steamaudio_cavea.png` stands in for `industry_steam.png`.
+Tried and not used (16.10): #4 (after the ray run the plot spans 6 s and the pinned beam arrivals sit in the first 0.1 s), #6 / #7 (from inside the camera sits in an order-1 beam and the view is yellow; from outside the order 2–3 beams to R1 fill the box), #9 (from above the order-1 beams cover the pool). #2 `panel_ray_shoebox.png` captured after the panel fix (5ac692b). Not attempted: #12 (needs a click on an editor Details button), #18 (GIF); `M10_steamaudio_cavea.png` stands in for `industry_steam.png`.
 
 | # | File | Level / mode | Camera and settings | What it must show | Used in |
 |---|---|---|---|---|---|
