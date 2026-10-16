@@ -97,6 +97,10 @@ Both solvers model only the early response (up to the order limit), so the metri
 
 *All beams of order ≤ 1 (2815 frustums at a very low opacity): from inside the room the translucent layers add up to a uniform tint — a picture of the beam budget, not an analysis view.*
 
+![the lattice of image sources around the shoebox, seen from outside](img/imagesources_outside.png)
+
+*Image sources of orders 1–3 seen from outside and above the room ("Only valid for receiver" off, spheres enlarged for the view): the mirrored lattice around the 10 × 7 × 3 m room, coloured by order (yellow 1, orange 2, red 3); inside the room the paths into the receivers and the floor heatmap.*
+
 ## Panel settings
 
 | Field | Setting | Default | Range | What changing it shows |

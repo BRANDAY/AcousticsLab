@@ -55,6 +55,10 @@ In `Level_Shoebox` (grid 10 × 7 at 1.2 m, 20 000 rays): C80 −5.87 … −1.97
 | ![T30 heatmap](../milestones/img/M3_heatmap_t30.png) | ![direct SPL heatmap](../milestones/img/M3_heatmap_direct_spl.png) |
 | T30: 4.70 … 4.75 s | Direct SPL for $L_W$ = 100 dB: 70.2 … 91.3 dB, yellow around the source |
 
+![C80 heatmap seen from above](img/heatmap_c80.png)
+
+*C80 over the 70 floor receivers seen from above (ray tracer, 20 000 rays, ray paths off): −5.9 … −2.0 dB, clearer (yellow) near the source; the panel shows R1 (T30 4.72 s, +2.9 % vs Eyring), bottom left the Schroeder decay of R1. The red line at the top is the engine's video-memory warning on the 4 GB development GPU.*
+
 ## Impulse-response plot
 
 Bottom-left panel, "Impulse response: energy (thin) and Schroeder decay (thick)":

@@ -15,7 +15,7 @@ The guide currently uses the milestone screenshots in [`docs/milestones/img`](..
 
 ## Missing (capture after M10)
 
-Done: `main_menu.png` (PIE of `Level_MainMenu`), `benchmark_panel.png` (crop of `M7_benchmark_panel.png`), `hybrid_compare.png` (crop of `M8_compare_early.png`).
+Done: `main_menu.png` (PIE of `Level_MainMenu`), `benchmark_panel.png` (crop of `M7_benchmark_panel.png`), `hybrid_compare.png` (crop of `M8_compare_early.png`), `imagesources_outside.png` (#5) and `heatmap_c80.png` (#13), captured 16.10.2026 after M10.
 
 | # | File | Level / mode | Camera and settings | What it must show | Used in |
 |---|---|---|---|---|---|
@@ -23,7 +23,7 @@ Done: `main_menu.png` (PIE of `Level_MainMenu`), `benchmark_panel.png` (crop of 
 | 3 | `ir_plot_pinned.png` | `Level_Shoebox`, ray tracer | crop to the bottom-left plot; run, select R1, **Pin**; select R3 | three curves: live R3 (cyan) and pinned R1 (orange), −5/−35 dB lines, 50/80 ms markers, legend with T30 / C80 | [05](05-visualization.md), [04](04-room-acoustic-metrics.md) |
 | 4 | `ir_plot_beam_vs_ray.png` | `Level_Shoebox` | beam run → R1 → **Pin**; ray run → R1; crop to the plot | discrete beam arrivals (pinned) against the ray-traced decay | [07](07-image-sources-and-beam-tracing.md), [10](10-hybrid.md) |
 | 5 | `imagesources_outside.png` | `Level_Shoebox`, Solver ImageSource, order 3 | camera outside and above the room, ≈ 25 m up, looking down at ~60°; Ray paths off, Image sources on, "Only valid for receiver" off | the lattice of image sources around the room coloured by order (yellow / orange / red) and the paths into R1 | [07](07-image-sources-and-beam-tracing.md) |
-| 6 | `beams_outside_order1.png` | `Level_Shoebox`, Solver BeamTracer, level 2, order 3 | camera outside the room (e.g. (−14, −10, 6) m looking at the centre); Beams on, slider 1, `bDrawEscapedBeams` off | the frustums of orders 0–1 seen from outside instead of the uniform tint of `M5_beamtracer_beams_order1.png` | [07](07-image-sources-and-beam-tracing.md) |
+| 6 | `beams_outside_order1.png` (tried 16.10: from outside the order-0/1 frustums still merge into one yellow box — try orders 2–3 with "Only with receiver" instead) | `Level_Shoebox`, Solver BeamTracer, level 2, order 3 | camera outside the room (e.g. (−14, −10, 6) m looking at the centre); Beams on, slider 1, `bDrawEscapedBeams` off | the frustums of orders 0–1 seen from outside instead of the uniform tint of `M5_beamtracer_beams_order1.png` | [07](07-image-sources-and-beam-tracing.md) |
 | 7 | `beams_receiver_clean.png` | as `M5_beamtracer_beams_receiver.png` | same view, notifications off, crop the editor chrome | retake of the published shot | [07](07-image-sources-and-beam-tracing.md), [walkthrough](walkthrough.md) §4 |
 | 8 | `pool_side.png` | `Level_Refraction`, source Pool, level 4, order 3, refraction on | camera outside the pool wall at water level, e.g. (−6.7, −8, 2) m looking +Y; Beams on, "Only with receiver" on, slider 3 | the beams to R1 bending at the water surface, seen from the side | [08](08-refraction.md), [walkthrough](walkthrough.md) §6 |
 | 9 | `pool_tir.png` | same | camera above the pool looking down; slider 1, `bDrawEscapedBeams` off | the narrow cone of refracted (cyan) beams below the source and the totally reflected (yellow) beams elsewhere | [08](08-refraction.md) |
