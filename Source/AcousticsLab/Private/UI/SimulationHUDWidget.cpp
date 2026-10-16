@@ -241,7 +241,8 @@ void USimulationHUDWidget::NativeConstruct()
 	{
 		BeamOrderSlider->OnValueChanged.AddUniqueDynamic(this, &USimulationHUDWidget::HandleBeamOrderChanged);
 	}
-	if (SettingsBox && Fields.IsEmpty())
+	// The default tree already registers non-settings fields (e.g. DrawOrder), so test the box itself.
+	if (SettingsBox && SettingsBox->GetChildrenCount() == 0)
 	{
 		BuildSettingsRows();
 	}
