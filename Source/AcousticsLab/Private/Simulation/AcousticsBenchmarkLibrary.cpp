@@ -48,6 +48,10 @@ bool UAcousticsBenchmarkLibrary::PrepareJob(UWorld* World, const FBeamBenchmarkO
 	{
 		OutJob.Settings.MaxBeamOrder = Options.MaxBeamOrder;
 	}
+	if (Options.MaxBeamNodes > 0)
+	{
+		OutJob.Settings.MaxBeamNodes = Options.MaxBeamNodes;
+	}
 	if (Options.SurfaceDivisions > 1)
 	{
 		*OutJob.Scene = OutJob.Scene->Tessellated(Options.SurfaceDivisions);

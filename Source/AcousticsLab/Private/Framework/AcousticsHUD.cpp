@@ -1,6 +1,7 @@
 #include "Framework/AcousticsHUD.h"
 
 #include "Audio/AuralizationComponent.h"
+#include "Audio/SoundwalkComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Framework/AcousticsPlayerController.h"
@@ -31,12 +32,21 @@ void AAcousticsHUD::DrawHUD()
 		? FString::Printf(TEXT("%d (%s)"), Controller->SelectedVariant, *UAuralizationComponent::VariantName(UAuralizationComponent::VariantFromKey(Controller->SelectedVariant)))
 		: FString(TEXT("none (1 = Dry, 2 = Ray, 3 = Beam, 4 = Hybrid)"));
 	const FString Line1 = FString::Printf(TEXT("%s   |   mode: %s   |   A/B variant: %s"), *Title, *Mode, *Variant);
-	const FString Line2 = Controller->IsUIMode()
+	const USoundwalkComponent* Soundwalk = Controller->GetSoundwalk();
+	const FString Line2 = Soundwalk
+		? (Controller->IsUIMode()
+			? TEXT("Soundwalk, cursor mode: edit the panel   Tab: back to the walk   1: Dry  2: Ray  3: Beam  4: Hybrid   N: ambient sources   Esc: main menu")
+			: TEXT("Soundwalk: WASD + mouse walk the rows, Space jumps   the camera is the receiver   Tab: panel   1: Dry  2: Ray  3: Beam  4: Hybrid   N: ambient sources   Esc: main menu"))
+		: Controller->IsUIMode()
 		? TEXT("Cursor mode: edit the panel, WASD still flies   Tab: fly mode   1: Dry  2: Ray  3: Beam  4: Hybrid (convolution)   B: benchmark   H: compare panel   Esc: main menu")
 		: TEXT("WASD + mouse: fly   Q/E: down/up   Tab: cursor mode (panel)   1: Dry  2: Ray  3: Beam  4: Hybrid (convolution)   B: benchmark   H: compare panel   Esc: main menu");
 
 	DrawText(Line1, FLinearColor::White, 24.f, 24.f, GEngine->GetMediumFont());
 	DrawText(Line2, FLinearColor(0.75f, 0.75f, 0.75f), 24.f, 48.f, GEngine->GetSmallFont());
+	if (Soundwalk)
+	{
+		DrawText(Soundwalk->DescribeState(), FLinearColor(0.55f, 1.0f, 0.65f), 24.f, 66.f, GEngine->GetSmallFont());
+	}
 	// Industry levels (M9): the plugin keys and which one plays; short, so the panel on the right does not cover it
 	// (the full state is in the panel's "Industry plugins" block).
 	const TArray<AIndustryAudioActor*> Industries = AIndustryAudioActor::FindAll(GetWorld());

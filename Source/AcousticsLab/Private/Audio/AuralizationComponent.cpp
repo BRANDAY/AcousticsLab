@@ -413,7 +413,7 @@ bool UAuralizationComponent::ActivateVariantSet(EAuralizationVariant InVariant)
 	AssignedResultKey = nullptr;
 
 	int32 Target = INDEX_NONE;
-	if (Set->ImpulseResponses.Contains(SelectedReceiver))
+	if (SelectedReceiver != INDEX_NONE && EnsureImpulseResponse(InVariant, SelectedReceiver))
 	{
 		Target = SelectedReceiver;
 	}
@@ -436,10 +436,73 @@ bool UAuralizationComponent::ActivateVariantSet(EAuralizationVariant InVariant)
 	return AssignImpulseResponse(Target);
 }
 
+bool UAuralizationComponent::EnsureImpulseResponse(EAuralizationVariant InVariant, int32 ReceiverIndex)
+{
+	FAuralizationVariantSet* Set = VariantSets.Find(InVariant);
+	if (!Set)
+	{
+		return false;
+	}
+	if (Set->ImpulseResponses.Contains(ReceiverIndex))
+	{
+		return true;
+	}
+	if (!Set->Result.IsValid() || !Set->Result->Receivers.IsValidIndex(ReceiverIndex))
+	{
+		return false;
+	}
+	const FReceiverResult& Receiver = Set->Result->Receivers[ReceiverIndex];
+	const double Start = FPlatformTime::Seconds();
+	FSynthesizedIR IR = FIRSynthesizer::SynthesizeForReceiver(Receiver, MakeSynthesisSettings());
+	if (!IR.IsValid())
+	{
+		StatusMessage = FString::Printf(TEXT("receiver %s has no energy"), *Receiver.Name);
+		return false;
+	}
+	FAuralizationReceiverInfo Info;
+	Info.ReceiverIndex = ReceiverIndex;
+	Info.ReceiverName = Receiver.Name;
+	Info.NumSamples = IR.Samples.Num();
+	Info.DurationSeconds = static_cast<float>(IR.DurationSeconds());
+	Info.bTruncatedByLevel = IR.bTruncatedByLevel;
+	Info.PeakDbFS = static_cast<float>(IR.PeakDbFS());
+	Info.NormalizationVolumeDb = NormalizationVolumeDbFor(IR);
+
+	// Drop the oldest on-demand responses (never the assigned one) before adding a new one.
+	while (Set->OnDemandOrder.Num() >= FMath::Max(1, MaxOnDemandResponses))
+	{
+		const int32 OldestPosition = Set->OnDemandOrder.IndexOfByPredicate([this, InVariant](int32 Index) { return !(InVariant == IRVariant && Index == SelectedReceiver); });
+		if (OldestPosition == INDEX_NONE)
+		{
+			break;
+		}
+		const int32 Oldest = Set->OnDemandOrder[OldestPosition];
+		Set->OnDemandOrder.RemoveAt(OldestPosition);
+		Set->ImpulseResponses.Remove(Oldest);
+		Set->Infos.RemoveAll([Oldest](const FAuralizationReceiverInfo& Entry) { return Entry.ReceiverIndex == Oldest; });
+		if (InVariant == IRVariant)
+		{
+			ReceiverInfos.RemoveAll([Oldest](const FAuralizationReceiverInfo& Entry) { return Entry.ReceiverIndex == Oldest; });
+		}
+	}
+	Set->OnDemandOrder.Add(ReceiverIndex);
+	Set->Infos.Add(Info);
+	if (InVariant == IRVariant)
+	{
+		ReceiverInfos.Add(Info);
+	}
+	if (bLogIRAssignment)
+	{
+		UE_LOG(LogAcoustics, Log, TEXT("Auralization: on-demand IR of %s (%s) synthesized in %.1f ms: %s (%d cached on demand)"), *Receiver.Name, *Set->SolverName,
+			(FPlatformTime::Seconds() - Start) * 1000.0, *IR.Describe(), Set->OnDemandOrder.Num());
+	}
+	Set->ImpulseResponses.Add(ReceiverIndex, MoveTemp(IR));
+	return true;
+}
+
 bool UAuralizationComponent::SelectReceiver(int32 ResultReceiverIndex)
 {
-	const FAuralizationVariantSet* Set = ActiveSet();
-	if (!Set || !Set->ImpulseResponses.Contains(ResultReceiverIndex))
+	if (!ActiveSet() || !EnsureImpulseResponse(IRVariant, ResultReceiverIndex))
 	{
 		SelectedReceiver = ResultReceiverIndex; // used when the next result arrives
 		return false;

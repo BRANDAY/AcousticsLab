@@ -1,0 +1,8 @@
+# AcousticsLab beam-tracer benchmark (M7), 2026-10-16 13:38:34
+# scene: Level_Amphitheatre, source S1; 8160 triangles (surface split 1); 4 receivers; subdivision level 3 (1280 root beams); max beam order 1; refraction off
+# machine: Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz; 6 physical / 12 logical cores; 15.9 GB RAM, 2.2 GB available at start
+# note: headless python commandlet (-NullRHI), editor closed, plan amphitheatre3_nobvh
+# 1 repetitions, wall time 25.1 s, all results identical: yes
+threads,bvh,repetition,total_s,build_s,query_s,nodes,fingerprint,identical
+1,off,1,18.993038,18.964135,0.028903,279110,5bf4748ee01d1fd1,yes
+12,off,1,4.478512,4.470000,0.008511,279110,5bf4748ee01d1fd1,yes

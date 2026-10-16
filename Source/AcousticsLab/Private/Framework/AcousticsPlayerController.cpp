@@ -5,7 +5,9 @@
 #include "Blueprint/UserWidget.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Audio/SoundwalkComponent.h"
 #include "Framework/AcousticsExplorerPawn.h"
+#include "Framework/AcousticsWalkerPawn.h"
 #include "GameFramework/GameModeBase.h"
 #include "InputAction.h"
 #include "InputActionValue.h"
@@ -72,7 +74,21 @@ void AAcousticsPlayerController::BeginPlay()
 			}
 			ShowComparePanel(true);
 		}
-		SetUIMode(true);
+		if (LevelMode == FName(TEXT("Soundwalk")))
+		{
+			// Menu 1.5 (SPEC §3.7, S5): walk first, the panel comes with Tab.
+			Soundwalk = NewObject<USoundwalkComponent>(this, TEXT("Soundwalk"));
+			Soundwalk->RegisterComponent();
+			if (SimulationHUD)
+			{
+				SimulationHUD->SetVisibility(ESlateVisibility::Collapsed);
+			}
+			SetUIMode(false);
+		}
+		else
+		{
+			SetUIMode(true);
+		}
 	}
 }
 
@@ -95,6 +111,7 @@ void AAcousticsPlayerController::SetupInputComponent()
 	Input->BindAction(ToggleUIAction, ETriggerEvent::Started, this, &AAcousticsPlayerController::OnToggleUI);
 	Input->BindAction(ToggleBenchmarkAction, ETriggerEvent::Started, this, &AAcousticsPlayerController::OnToggleBenchmark);
 	Input->BindAction(ToggleCompareAction, ETriggerEvent::Started, this, &AAcousticsPlayerController::OnToggleCompare);
+	Input->BindAction(ToggleAmbientAction, ETriggerEvent::Started, this, &AAcousticsPlayerController::OnToggleAmbient);
 	for (int32 Index = 0; Index < VariantActions.Num(); ++Index)
 	{
 		Input->BindAction(VariantActions[Index], ETriggerEvent::Started, this, &AAcousticsPlayerController::OnSelectVariant, Index + 1);
@@ -119,6 +136,8 @@ void AAcousticsPlayerController::BuildInputAssets()
 	ToggleBenchmarkAction->ValueType = EInputActionValueType::Boolean;
 	ToggleCompareAction = NewObject<UInputAction>(this, TEXT("IA_ToggleCompare"));
 	ToggleCompareAction->ValueType = EInputActionValueType::Boolean;
+	ToggleAmbientAction = NewObject<UInputAction>(this, TEXT("IA_ToggleAmbient"));
+	ToggleAmbientAction->ValueType = EInputActionValueType::Boolean;
 
 	// Maps a key to an action. bSwizzle routes the key to the Y axis (forward), bNegate flips the sign.
 	auto MapAxisKey = [this](UInputAction* Action, const FKey& Key, bool bNegate, bool bSwizzle)
@@ -164,6 +183,7 @@ void AAcousticsPlayerController::BuildInputAssets()
 	MappingContext->MapKey(ToggleUIAction, EKeys::Tab);
 	MappingContext->MapKey(ToggleBenchmarkAction, EKeys::B);
 	MappingContext->MapKey(ToggleCompareAction, EKeys::H);
+	MappingContext->MapKey(ToggleAmbientAction, EKeys::N);
 
 	// Keys 1-6 are reserved for the A/B variants (SPEC §3.7).
 	constexpr int32 NumVariants = 6;
@@ -340,6 +360,10 @@ void AAcousticsPlayerController::OnMove(const FInputActionValue& Value)
 	{
 		Explorer->Move(Value.Get<FVector2D>());
 	}
+	else if (AAcousticsWalkerPawn* Walker = Cast<AAcousticsWalkerPawn>(GetPawn()))
+	{
+		Walker->Move(Value.Get<FVector2D>());
+	}
 }
 
 void AAcousticsPlayerController::OnLook(const FInputActionValue& Value)
@@ -352,6 +376,10 @@ void AAcousticsPlayerController::OnLook(const FInputActionValue& Value)
 	{
 		Explorer->Look(Value.Get<FVector2D>());
 	}
+	else if (AAcousticsWalkerPawn* Walker = Cast<AAcousticsWalkerPawn>(GetPawn()))
+	{
+		Walker->Look(Value.Get<FVector2D>());
+	}
 }
 
 void AAcousticsPlayerController::OnToggleUI(const FInputActionValue& Value)
@@ -359,6 +387,20 @@ void AAcousticsPlayerController::OnToggleUI(const FInputActionValue& Value)
 	if (!bIsMainMenu)
 	{
 		SetUIMode(!bUIMode);
+		// Soundwalk: the panel comes and goes with the cursor (the walk itself needs the whole view).
+		if (Soundwalk && SimulationHUD && !IsBenchmarkPanelShown() && !IsComparePanelShown())
+		{
+			SimulationHUD->SetVisibility(bUIMode ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+		}
+	}
+}
+
+void AAcousticsPlayerController::OnToggleAmbient(const FInputActionValue& Value)
+{
+	if (Soundwalk)
+	{
+		Soundwalk->SetAmbientEnabled(!Soundwalk->bAmbientEnabled);
+		UE_LOG(LogAcoustics, Log, TEXT("Soundwalk: ambient sources %s"), Soundwalk->bAmbientEnabled ? TEXT("on") : TEXT("off"));
 	}
 }
 
@@ -367,6 +409,10 @@ void AAcousticsPlayerController::OnMoveUp(const FInputActionValue& Value)
 	if (AAcousticsExplorerPawn* Explorer = Cast<AAcousticsExplorerPawn>(GetPawn()))
 	{
 		Explorer->MoveUp(Value.Get<float>());
+	}
+	else if (AAcousticsWalkerPawn* Walker = Cast<AAcousticsWalkerPawn>(GetPawn()))
+	{
+		Walker->MoveUp(Value.Get<float>());
 	}
 }
 

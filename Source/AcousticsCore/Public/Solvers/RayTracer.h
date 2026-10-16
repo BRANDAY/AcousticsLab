@@ -105,8 +105,20 @@ public:
 	/** Upper bound of the chunk count: each chunk holds a histogram per receiver until the reduction (memory). */
 	static constexpr int32 MaxChunks = 128;
 
-	/** Rays per chunk used by Run: Settings.RaysPerChunk, raised for large NumRays so that the chunk count <= MaxChunks. */
-	static int32 EffectiveRaysPerChunk(const FRayTracerSettings& Settings);
+	/** Lower bound of the chunk count limit below: enough chunks to keep the workers busy. */
+	static constexpr int32 MinChunkLimit = 16;
+
+	/** Memory the per-chunk histograms may take together (M10: 856 grid receivers at 200 000 rays), bytes. */
+	static constexpr int64 ChunkHistogramBudgetBytes = 512ll * 1024 * 1024;
+
+	/** Chunk count limit: MaxChunks, lowered for many receivers so that chunks x receivers x bins stays in the budget (>= MinChunkLimit). */
+	static int32 MaxChunksFor(const FRayTracerSettings& Settings, int32 NumReceivers);
+
+	/**
+	 * Rays per chunk used by Run: Settings.RaysPerChunk, raised so that the chunk count <= MaxChunksFor(Settings,
+	 * NumReceivers). Depends on the settings and the receiver count only, never on the worker count.
+	 */
+	static int32 EffectiveRaysPerChunk(const FRayTracerSettings& Settings, int32 NumReceivers = 0);
 	static int32 NumPathSamples(int32 NumRays, int32 MaxPaths);
 
 	/** Reflected rays start this far from the surface along the facing normal, m. */

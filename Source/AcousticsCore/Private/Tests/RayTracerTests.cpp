@@ -286,6 +286,14 @@ bool FAcousticsRayTracerCancelTest::RunTest(const FString& Parameters)
 	FRayTracerSettings Large = TestSettings(5000000, 1, 0);
 	const int32 LargeChunk = FRayTracer::EffectiveRaysPerChunk(Large);
 	TestTrue(TEXT("5 M rays: at most MaxChunks chunks"), FMath::DivideAndRoundUp(Large.NumRays, LargeChunk) <= FRayTracer::MaxChunks);
+	// Many receivers (the M10 cavea grid): fewer, larger chunks so that the per-chunk histograms fit the budget.
+	FRayTracerSettings Grid = TestSettings(200000, 1, 0);
+	TestEqual(TEXT("74 receivers keep the 128-chunk limit"), FRayTracer::MaxChunksFor(Grid, 74), FRayTracer::MaxChunks);
+	const int32 GridChunks = FRayTracer::MaxChunksFor(Grid, 860);
+	const int64 Bins = FMath::CeilToInt64(Grid.MaxTimeSeconds / Grid.BinSeconds);
+	TestTrue(TEXT("860 receivers: fewer chunks, at least MinChunkLimit"), GridChunks < FRayTracer::MaxChunks && GridChunks >= FRayTracer::MinChunkLimit);
+	TestTrue(TEXT("860 receivers: chunk histograms within the budget"), GridChunks * 860ll * Bins * Acoustics::NumBands * 8 <= FRayTracer::ChunkHistogramBudgetBytes || GridChunks == FRayTracer::MinChunkLimit);
+	TestTrue(TEXT("860 receivers: chunk count <= limit"), FMath::DivideAndRoundUp(Grid.NumRays, FRayTracer::EffectiveRaysPerChunk(Grid, 860)) <= GridChunks);
 
 	// Stop during a long run (5 M rays, low absorption: minutes uncancelled) returns within a fraction of a second.
 	const FAcousticScene Scene = FAcousticScene::MakeShoebox(RoomSize, FAcousticMaterialProps(TEXT("Validation"), 0.05, 0.2));

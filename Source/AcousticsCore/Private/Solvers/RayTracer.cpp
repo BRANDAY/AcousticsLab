@@ -332,12 +332,23 @@ namespace
 	}
 }
 
-int32 FRayTracer::EffectiveRaysPerChunk(const FRayTracerSettings& Settings)
+int32 FRayTracer::MaxChunksFor(const FRayTracerSettings& Settings, int32 NumReceivers)
+{
+	if (NumReceivers <= 0)
+	{
+		return MaxChunks;
+	}
+	const int64 NumBins = FMath::Max<int64>(1, FMath::CeilToInt64(Settings.MaxTimeSeconds / FMath::Max(Settings.BinSeconds, 1e-6)));
+	const int64 BytesPerChunk = static_cast<int64>(NumReceivers) * NumBins * Acoustics::NumBands * static_cast<int64>(sizeof(double));
+	return static_cast<int32>(FMath::Clamp<int64>(ChunkHistogramBudgetBytes / FMath::Max<int64>(1, BytesPerChunk), MinChunkLimit, MaxChunks));
+}
+
+int32 FRayTracer::EffectiveRaysPerChunk(const FRayTracerSettings& Settings, int32 NumReceivers)
 {
 	// Every chunk keeps a histogram per receiver until the fixed-order reduction; bounding the chunk count bounds that
-	// memory (5 M rays x 74 receivers x 6 s at 1 ms took ~17 GB with 1024-ray chunks). Depends on NumRays only, so the
-	// result stays independent of the worker count.
-	return FMath::Max(FMath::Max(1, Settings.RaysPerChunk), FMath::DivideAndRoundUp(Settings.NumRays, MaxChunks));
+	// memory (5 M rays x 74 receivers x 6 s at 1 ms took ~17 GB with 1024-ray chunks; 856 grid receivers x 128 chunks
+	// x 3 s ~2.6 GB). Depends on NumRays and the receiver count only, so the result stays independent of the worker count.
+	return FMath::Max(FMath::Max(1, Settings.RaysPerChunk), FMath::DivideAndRoundUp(Settings.NumRays, MaxChunksFor(Settings, NumReceivers)));
 }
 
 FVector3d FRayTracer::FibonacciDirection(int32 Index, int32 Count)
@@ -502,7 +513,7 @@ FSimulationResult FRayTracer::Run(const FAcousticScene& Scene, const FVector3d& 
 	}
 
 	FTraceContext Context{ Scene, Source, Receivers, Settings };
-	Context.RaysPerChunk = EffectiveRaysPerChunk(Settings);
+	Context.RaysPerChunk = EffectiveRaysPerChunk(Settings, Receivers.Num());
 	Context.Progress = Progress;
 	Context.SpeedOfSound = Scene.GetMedium(0).SpeedOfSound;
 	Context.E0 = 1.0 / static_cast<double>(Settings.NumRays);

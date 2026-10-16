@@ -10,6 +10,7 @@ class UBenchmarkWidget;
 class UCompareWidget;
 class UMainMenuWidget;
 class USimulationHUDWidget;
+class USoundwalkComponent;
 struct FInputActionValue;
 
 /**
@@ -20,6 +21,9 @@ struct FInputActionValue;
  * The comparison panel (UCompareWidget, M8) replaces it in ?mode=Hybrid (menu 1.4) and ?mode=Compare (menu 3), with the
  * hybrid solver selected; H toggles the comparison and the simulation panel in any scene level.
  * Keys 1-6 select the A/B variant (SPEC §3.7).
+ * ?mode=Soundwalk (menu 1.5, M10): the game mode spawns a walker on the cavea, this controller adds a USoundwalkComponent
+ * (camera = live receiver), the walk starts without the panel; Tab shows the panel with the cursor, N toggles the
+ * ambient sources.
  */
 UCLASS()
 class ACOUSTICSLAB_API AAcousticsPlayerController : public APlayerController
@@ -72,6 +76,12 @@ public:
 
 	USimulationHUDWidget* GetSimulationHUD() const { return SimulationHUD; }
 
+	/** The soundwalk of ?mode=Soundwalk, null in the other modes. */
+	USoundwalkComponent* GetSoundwalk() const { return Soundwalk; }
+
+	UFUNCTION(BlueprintPure, Category = "Acoustics")
+	bool IsSoundwalk() const { return Soundwalk != nullptr; }
+
 	/** Mode requested through the level URL (?mode=Beam|Refraction|Benchmark|Hybrid|Soundwalk|Compare); None when absent. */
 	UPROPERTY(BlueprintReadOnly, Category = "Acoustics")
 	FName LevelMode;
@@ -102,6 +112,7 @@ private:
 	void OnToggleUI(const FInputActionValue& Value);
 	void OnToggleBenchmark(const FInputActionValue& Value);
 	void OnToggleCompare(const FInputActionValue& Value);
+	void OnToggleAmbient(const FInputActionValue& Value);
 	void OnSelectVariant(const FInputActionValue& Value, int32 Variant);
 
 	UPROPERTY()
@@ -127,6 +138,12 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UInputAction> ToggleCompareAction;
+
+	UPROPERTY()
+	TObjectPtr<UInputAction> ToggleAmbientAction;
+
+	UPROPERTY()
+	TObjectPtr<USoundwalkComponent> Soundwalk;
 
 	UPROPERTY()
 	TArray<TObjectPtr<UInputAction>> VariantActions;

@@ -24,6 +24,14 @@ struct ACOUSTICSLAB_API FBeamBenchmarkOptions
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Benchmark", meta = (ClampMin = "-1", ClampMax = "10"))
 	int32 MaxBeamOrder = -1;
 
+	/**
+	 * Node budget of the tree; 0 = the manager setting. A tree cut by the budget depends on the scheduling once the
+	 * subtrees exceed twice the budget (M7), so a benchmark must stay below it (M10: the amphitheatre needs 1.2 M nodes
+	 * at level 2, order 2).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Benchmark", meta = (ClampMin = "0"))
+	int32 MaxBeamNodes = 0;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Benchmark", meta = (ClampMin = "1", ClampMax = "20"))
 	int32 Repetitions = 3;
 

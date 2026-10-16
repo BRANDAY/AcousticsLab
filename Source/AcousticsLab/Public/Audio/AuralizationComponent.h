@@ -74,6 +74,9 @@ struct FAuralizationVariantSet
 	TArray<FAuralizationReceiverInfo> Infos;
 	TSharedPtr<const FSimulationResult> Result;
 	FString SolverName;
+
+	/** Receivers synthesized on demand (grid cells of the soundwalk), oldest first; capped by MaxOnDemandResponses. */
+	TArray<int32> OnDemandOrder;
 };
 
 /**
@@ -126,6 +129,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Acoustics|Synthesis", meta = (ClampMin = "-30.0", ClampMax = "30.0"))
 	float ExtraGainDb = 0.0f;
 
+	/**
+	 * Responses kept per variant for receivers that were not synthesized with the result (grid cells reached by the
+	 * soundwalk, M10); the oldest are dropped first. A 3 s response is ~0.6 MB.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Acoustics|Synthesis", meta = (ClampMin = "1", ClampMax = "512"))
+	int32 MaxOnDemandResponses = 32;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Acoustics|Export")
 	bool bExportWav = true;
 
@@ -172,7 +182,11 @@ public:
 	/** Synthesizes and exports the responses of the point receivers and assigns the selected (or the first) one. */
 	void SetResult(const TSharedPtr<const FSimulationResult>& Result, const TArray<int32>& PointReceiverIndices, const FString& InLevelName, const FString& InSolverName);
 
-	/** Assigns the cached response of a receiver of the last result; remembers the index when there is no result yet. */
+	/**
+	 * Assigns the response of a receiver of the last result: the cached one of a point receiver, or one synthesized now
+	 * from the receiver's histogram (any receiver of the result, e.g. a grid cell: no solver run, no WAV export). Remembers
+	 * the index when there is no result yet.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Acoustics|Auralization")
 	bool SelectReceiver(int32 ResultReceiverIndex);
 
@@ -235,6 +249,8 @@ private:
 	bool EnsureRouting();
 	UAudioComponent* EnsureAudioComponent();
 	bool AssignImpulseResponse(int32 ReceiverIndex);
+	/** The set has a response for the receiver, synthesizing it from Set.Result when needed (on-demand cache). */
+	bool EnsureImpulseResponse(EAuralizationVariant InVariant, int32 ReceiverIndex);
 	bool ActivateVariantSet(EAuralizationVariant InVariant);
 	const FAuralizationVariantSet* ActiveSet() const { return VariantSets.Find(IRVariant); }
 	void ApplyVariantRouting();

@@ -26,6 +26,11 @@ PLANS = {
     "refraction": dict(map="/Game/Maps/Level_Refraction", level=2, order=3, split=1, source="Pool", grids=True),
     # The same level, directional source Lens in glycerol: 110 root beams of level 6, all of them on the sphere (balanced).
     "lens": dict(map="/Game/Maps/Level_Refraction", level=6, order=3, split=1, source="Lens", grids=True),
+    # SPEC §5.4 (M10): the empty amphitheatre (8160 triangles, R1..R4 without the 856-cell grid), subdivision 2 and 3.
+    # Level 2 / order 2 builds 1.21 M nodes: the budget is raised so that the tree is complete (a truncated tree depends
+    # on the scheduling); level 3 / order 2 would need ~5 M nodes, so level 3 runs order 1.
+    "amphitheatre2": dict(map="/Game/Maps/Level_Amphitheatre", level=2, order=2, split=1, source=None, grids=False, nodes=2000000),
+    "amphitheatre3": dict(map="/Game/Maps/Level_Amphitheatre", level=3, order=1, split=1, source=None, grids=False, nodes=2000000),
 }
 
 CALIBRATE = [
@@ -49,6 +54,7 @@ def run(name, plan, repetitions=3, threads=None, with_bvh=True, without_bvh=True
     options.subdivision_level = plan["level"]
     options.max_beam_order = plan["order"]
     options.surface_divisions = plan["split"]
+    options.max_beam_nodes = plan.get("nodes", 0)
     options.repetitions = repetitions
     options.include_receiver_grids = plan["grids"]
     options.with_bvh = with_bvh
@@ -77,6 +83,14 @@ def main(args):
                 plan = dict(PLANS[name])
                 plan.update(override)
                 run("calibrate_" + name, plan, repetitions=1, threads=[1, 12], without_bvh=True, note="calibration")
+        elif arg == "calibrate_amphitheatre":
+            for name in ("amphitheatre2", "amphitheatre3"):
+                run("calibrate_" + name, PLANS[name], repetitions=1, threads=[1, 12], without_bvh=False, note="calibration")
+        elif arg == "amphitheatre":
+            # Thread matrix with BVH on; BVH off only at 1 and 12 threads (brute force over 8160 triangles is slow).
+            for name in ("amphitheatre2", "amphitheatre3"):
+                run(name, PLANS[name], repetitions=2, without_bvh=False)
+                run(name + "_nobvh", PLANS[name], repetitions=1, threads=[1, 12], with_bvh=False, without_bvh=True)
         elif arg == "all":
             for name in ("shoebox", "shoebox_split", "lens", "refraction"):
                 run(name, PLANS[name])

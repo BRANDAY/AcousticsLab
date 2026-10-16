@@ -15,6 +15,7 @@
 #include "Scene/AcousticSource.h"
 #include "Scene/ReceiverGrid.h"
 #include "Simulation/AcousticSimulationManager.h"
+#include "Solvers/HybridTracer.h"
 #include "Solvers/RayTracer.h"
 
 namespace
@@ -30,6 +31,58 @@ namespace
 	{
 		return bValid ? FString::SanitizeFloat(FMath::RoundToDouble(Value * FMath::Pow(10.0, Decimals)) / FMath::Pow(10.0, Decimals), 0) : FString(TEXT("n/a"));
 	}
+
+	/** Amphitheatre scene of the loaded level with the point receivers R1..R4 (no grid); false with a message. */
+	bool PrepareAmphitheatre(UObject* WorldContextObject, bool bAudience, bool bVelarium, FAcousticScene& OutScene, FVector3d& OutSource,
+		TArray<FSolverReceiver>& OutReceivers, AAcousticSimulationManager*& OutManager, FString& OutError)
+	{
+		UWorld* World = GEngine ? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull) : nullptr;
+		AAmphitheatreActor* Amphitheatre = AAmphitheatreActor::Find(World);
+		OutManager = AAcousticSimulationManager::FindOrSpawn(World);
+		TArray<AAcousticSource*> Sources = AAcousticSource::FindAll(World);
+		if (!Amphitheatre || !OutManager || Sources.Num() == 0)
+		{
+			OutError = TEXT("no AmphitheatreActor / simulation manager / source in this world");
+			return false;
+		}
+		Amphitheatre->SetVelarium(bVelarium);
+		Amphitheatre->SetAudience(bAudience);
+		if (!OutManager->ExtractScene(OutScene, OutError))
+		{
+			return false;
+		}
+		OutSource = Sources[0]->GetPositionMeters();
+		OutReceivers.Reset();
+		for (AAcousticReceiver* Receiver : AAcousticReceiver::FindAll(World))
+		{
+			OutReceivers.Emplace(Receiver->ReceiverId.ToString(), Receiver->GetPositionMeters(), 0.5);
+		}
+		return OutReceivers.Num() > 0;
+	}
+
+	void RestoreAmphitheatre(UObject* WorldContextObject)
+	{
+		UWorld* World = GEngine ? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::ReturnNull) : nullptr;
+		if (AAmphitheatreActor* Amphitheatre = AAmphitheatreActor::Find(World))
+		{
+			Amphitheatre->SetVelarium(false);
+			Amphitheatre->SetAudience(false);
+		}
+	}
+
+	struct FStat
+	{
+		TArray<double> Values;
+		double Mean() const { double Sum = 0.0; for (const double V : Values) { Sum += V; } return Values.Num() ? Sum / Values.Num() : 0.0; }
+		double StdDev() const
+		{
+			if (Values.Num() < 2) { return 0.0; }
+			const double M = Mean();
+			double Sum = 0.0;
+			for (const double V : Values) { Sum += FMath::Square(V - M); }
+			return FMath::Sqrt(Sum / (Values.Num() - 1));
+		}
+	};
 }
 
 FString UAcousticsExperimentLibrary::RunShoeboxAlphaSweep(int32 NumRays, FString& OutCsvPath)
@@ -209,4 +262,250 @@ FString UAcousticsExperimentLibrary::RunAmphitheatreConditions(UObject* WorldCon
 	FFileHelper::SaveStringToFile(RowCsv, *OutCsvPath);
 	FFileHelper::SaveStringToFile(PointCsv, *(Dir / TEXT("E5_amphitheatre_points.csv")));
 	return FString::Printf(TEXT("Rays %d, %d point receivers + %d grid points.\n\n%s\n%s"), NumRays, NumPoints, Receivers.Num() - NumPoints, *MdPoints, *MdRows);
+}
+
+FString UAcousticsExperimentLibrary::RunRayConvergence(UObject* WorldContextObject, const TArray<int32>& RayCounts, int32 NumSeeds, FString& OutCsvPath)
+{
+	struct FSceneCase { FString Name; FAcousticScene Scene; FVector3d Source; TArray<FSolverReceiver> Receivers; };
+	TArray<FSceneCase> Cases;
+	{
+		FSceneCase& Shoebox = Cases.AddDefaulted_GetRef();
+		Shoebox.Name = TEXT("shoebox a0.1 s0.2");
+		Shoebox.Scene = FAcousticScene::MakeShoebox(FVector3d(10.0, 7.0, 3.0), FAcousticMaterialProps(TEXT("Convergence"), 0.1, 0.2));
+		Shoebox.Source = FVector3d(-3.0, -1.5, 1.5);
+		Shoebox.Receivers.Emplace(TEXT("R1"), FVector3d(3.0, 1.5, 1.5), 0.5);
+		Shoebox.Receivers.Emplace(TEXT("R2"), FVector3d(0.0, 2.5, 1.2), 0.5);
+	}
+	{
+		FSceneCase Amph;
+		Amph.Name = TEXT("amphitheatre audience");
+		AAcousticSimulationManager* Manager = nullptr;
+		FString Error;
+		if (PrepareAmphitheatre(WorldContextObject, true, false, Amph.Scene, Amph.Source, Amph.Receivers, Manager, Error))
+		{
+			Cases.Add(MoveTemp(Amph));
+		}
+		else
+		{
+			UE_LOG(LogAcoustics, Warning, TEXT("E2: amphitheatre skipped: %s"), *Error);
+		}
+		RestoreAmphitheatre(WorldContextObject);
+	}
+	TArray<int32> Counts = RayCounts;
+	Counts.Sort();
+	NumSeeds = FMath::Max(1, NumSeeds);
+
+	FString Csv = TEXT("scene,receiver,rays,seeds,t30_mean_s,t30_sd_s,t30_valid,c80_mean_db,c80_sd_db,edt_mean_s,edt_sd_s,trace_mean_s\n");
+	FString Md = FString::Printf(TEXT("Seeds per N: %d. Cells: mean +- standard deviation over the seeds; dev = mean minus the mean at the largest N.\n\n"), NumSeeds);
+	for (FSceneCase& Case : Cases)
+	{
+		// [receiver][count] -> stats
+		TArray<TArray<FStat>> T30, C80, EDT;
+		TArray<TArray<int32>> ValidT30;
+		TArray<double> TraceMean;
+		T30.SetNum(Case.Receivers.Num()); C80.SetNum(Case.Receivers.Num()); EDT.SetNum(Case.Receivers.Num()); ValidT30.SetNum(Case.Receivers.Num());
+		for (int32 R = 0; R < Case.Receivers.Num(); ++R)
+		{
+			T30[R].SetNum(Counts.Num()); C80[R].SetNum(Counts.Num()); EDT[R].SetNum(Counts.Num()); ValidT30[R].Init(0, Counts.Num());
+		}
+		TraceMean.Init(0.0, Counts.Num());
+		for (int32 C = 0; C < Counts.Num(); ++C)
+		{
+			for (int32 Seed = 1; Seed <= NumSeeds; ++Seed)
+			{
+				FRayTracerSettings Settings;
+				Settings.NumRays = Counts[C];
+				Settings.Seed = static_cast<uint32>(Seed);
+				Settings.MaxPathsForVisualization = 0;
+				const FSimulationResult Result = FRayTracer::Run(Case.Scene, Case.Source, Case.Receivers, Settings);
+				TraceMean[C] += Result.Timing.TotalSeconds / NumSeeds;
+				for (int32 R = 0; R < Result.Receivers.Num(); ++R)
+				{
+					const FBandMetrics& Band = Result.Receivers[R].Metrics.Band(0);
+					if (Band.bT30Valid && Band.T30 < 10.0)
+					{
+						T30[R][C].Values.Add(Band.T30);
+						++ValidT30[R][C];
+					}
+					C80[R][C].Values.Add(Band.C80);
+					EDT[R][C].Values.Add(Band.EDT);
+				}
+			}
+			UE_LOG(LogAcoustics, Display, TEXT("E2: %s, %d rays x %d seeds: %.2f s per run"), *Case.Name, Counts[C], NumSeeds, TraceMean[C]);
+		}
+		Md += FString::Printf(TEXT("**%s** (%d triangles)\n\n| N | trace, s |"), *Case.Name, Case.Scene.NumTriangles());
+		FString Separator = TEXT("|---|---|");
+		for (const FSolverReceiver& Receiver : Case.Receivers)
+		{
+			Md += FString::Printf(TEXT(" %s T30, s (dev) | %s C80, dB (dev) |"), *Receiver.Name, *Receiver.Name);
+			Separator += TEXT("---|---|");
+		}
+		Md += TEXT("\n") + Separator + TEXT("\n");
+		const int32 Last = Counts.Num() - 1;
+		for (int32 C = 0; C < Counts.Num(); ++C)
+		{
+			Md += FString::Printf(TEXT("| %d | %.2f |"), Counts[C], TraceMean[C]);
+			for (int32 R = 0; R < Case.Receivers.Num(); ++R)
+			{
+				const bool bT30 = T30[R][C].Values.Num() > 0;
+				const bool bRefT30 = T30[R][Last].Values.Num() > 0;
+				Md += FString::Printf(TEXT(" %s +- %s (%s) | %.2f +- %.2f (%+.2f) |"),
+					*Num(T30[R][C].Mean(), bT30, 3), *Num(T30[R][C].StdDev(), bT30, 3), *Num(T30[R][C].Mean() - T30[R][Last].Mean(), bT30 && bRefT30, 3),
+					C80[R][C].Mean(), C80[R][C].StdDev(), C80[R][C].Mean() - C80[R][Last].Mean());
+				Csv += FString::Printf(TEXT("%s,%s,%d,%d,%.4f,%.4f,%d,%.3f,%.3f,%.4f,%.4f,%.3f\n"), *Case.Name, *Case.Receivers[R].Name, Counts[C], NumSeeds,
+					T30[R][C].Mean(), T30[R][C].StdDev(), ValidT30[R][C], C80[R][C].Mean(), C80[R][C].StdDev(), EDT[R][C].Mean(), EDT[R][C].StdDev(), TraceMean[C]);
+			}
+			Md += TEXT("\n");
+		}
+		Md += TEXT("\n");
+	}
+	OutCsvPath = ExperimentDir() / TEXT("E2_convergence.csv");
+	FFileHelper::SaveStringToFile(Csv, *OutCsvPath);
+	return Md;
+}
+
+FString UAcousticsExperimentLibrary::RunMissedReflections(UObject* WorldContextObject, const TArray<int32>& RayCounts, int32 K, int32 SubdivisionLevel, float MixingTimeMs, int32 MaxBeamNodes, FString& OutCsvPath)
+{
+	FAcousticScene Scene;
+	FVector3d Source;
+	TArray<FSolverReceiver> Receivers;
+	AAcousticSimulationManager* Manager = nullptr;
+	FString Error;
+	const bool bReady = PrepareAmphitheatre(WorldContextObject, false, false, Scene, Source, Receivers, Manager, Error);
+	RestoreAmphitheatre(WorldContextObject);
+	if (!bReady)
+	{
+		return FString::Printf(TEXT("E3: %s"), *Error);
+	}
+	FString Csv = TEXT("rays,receiver,k,t_mix_ms,beam_early,beam_dropped,found_by_rays,missed_by_rays,beam_early_energy,ray_early_energy,ray_vs_beam_pct,beam_s,ray_s,beam_nodes\n");
+	FString Md = FString::Printf(TEXT("Amphitheatre empty, %d triangles, beams of order <= %d, t_mix %.0f ms after the emission, beam tree cap %d nodes. Cells: early specular reflections found / missed by the pure ray run (of the beam count), early energy rays vs beams.\n\n| rays |"),
+		Scene.NumTriangles(), K, MixingTimeMs, MaxBeamNodes);
+	FString Separator = TEXT("|---|");
+	for (const FSolverReceiver& Receiver : Receivers)
+	{
+		Md += FString::Printf(TEXT(" %s found / missed of beams, energy |"), *Receiver.Name);
+		Separator += TEXT("---|");
+	}
+	Md += TEXT(" beams, s | rays, s |\n") + Separator + TEXT("---|---|\n");
+	for (const int32 Rays : RayCounts)
+	{
+		FHybridTracerSettings Settings = Manager->Settings.ToHybridTracerSettings();
+		Settings.K = K;
+		Settings.MixingTimeSeconds = MixingTimeMs / 1000.0;
+		if (MaxBeamNodes > 0)
+		{
+			Settings.Beam.MaxBeamNodes = MaxBeamNodes;
+		}
+		Settings.bCountMissedReflections = true;
+		Settings.Ray.NumRays = Rays;
+		Settings.Ray.Seed = 1;
+		Settings.Ray.MaxPathsForVisualization = 0;
+		if (SubdivisionLevel >= 0)
+		{
+			Settings.Beam.SubdivisionLevel = SubdivisionLevel;
+		}
+		const FHybridResult Result = FHybridTracer::Run(Scene, Source, Receivers, Settings);
+		if (!Result.IsValid())
+		{
+			return FString::Printf(TEXT("E3: hybrid run failed at %d rays"), Rays);
+		}
+		const int32 Nodes = Result.PureBeam->NumBeamNodes;
+		Md += FString::Printf(TEXT("| %d |"), Rays);
+		for (int32 R = 0; R < Result.Stats.Num(); ++R)
+		{
+			const FHybridReceiverStats& Stat = Result.Stats[R];
+			const double Ratio = Stat.BeamEarlyEnergy > 0.0 ? 100.0 * Stat.RayExcludedEnergy / Stat.BeamEarlyEnergy : 0.0;
+			Md += FString::Printf(TEXT(" %d / %d of %d, %.0f %% |"), Stat.NumFoundByRays, Stat.NumMissedByRays, Stat.NumBeamEarly, Ratio);
+			Csv += FString::Printf(TEXT("%d,%s,%d,%.0f,%d,%d,%d,%d,%.6g,%.6g,%.1f,%.3f,%.3f,%d\n"), Rays, *Receivers[R].Name, K, MixingTimeMs, Stat.NumBeamEarly, Stat.NumBeamDropped,
+				Stat.NumFoundByRays, Stat.NumMissedByRays, Stat.BeamEarlyEnergy, Stat.RayExcludedEnergy, Ratio, Result.BeamSeconds, Result.RaySeconds, Nodes);
+		}
+		Md += FString::Printf(TEXT(" %.2f | %.2f |\n"), Result.BeamSeconds, Result.RaySeconds);
+		UE_LOG(LogAcoustics, Display, TEXT("E3: %d rays: beams %.2f s (%d nodes), rays %.2f s"), Rays, Result.BeamSeconds, Nodes, Result.RaySeconds);
+	}
+	OutCsvPath = ExperimentDir() / TEXT("E3_missed_reflections.csv");
+	FFileHelper::SaveStringToFile(Csv, *OutCsvPath);
+	return Md;
+}
+
+FString UAcousticsExperimentLibrary::RunEmptyDecayCheck(UObject* WorldContextObject, int32 NumRays, FString& OutCsvPath)
+{
+	FAcousticScene BaseScene;
+	FVector3d Source;
+	TArray<FSolverReceiver> Receivers;
+	AAcousticSimulationManager* Manager = nullptr;
+	FString Error;
+	const bool bReady = PrepareAmphitheatre(WorldContextObject, false, false, BaseScene, Source, Receivers, Manager, Error);
+	RestoreAmphitheatre(WorldContextObject);
+	if (!bReady)
+	{
+		return FString::Printf(TEXT("E5b: %s"), *Error);
+	}
+	struct FCase { const TCHAR* Name; int32 MaxOrder; double TMax; double StoneScattering; };
+	const FCase Cases[] = {
+		{ TEXT("fast pass: order <= 200, T_max 3 s, s 0.2"), 200, 3.0, -1.0 },
+		{ TEXT("order <= 2000, T_max 3 s, s 0.2"), 2000, 3.0, -1.0 },
+		{ TEXT("order <= 2000, T_max 8 s, s 0.2"), 2000, 8.0, -1.0 },
+		{ TEXT("order <= 2000, T_max 8 s, s 0.5"), 2000, 8.0, 0.5 },
+		{ TEXT("order <= 2000, T_max 8 s, s 0.8"), 2000, 8.0, 0.8 },
+	};
+	FString Csv = TEXT("case,receiver,max_order,t_max_s,stone_scattering,c80_db,t30_s,t30_valid,t20_s,edt_s,trace_s\n");
+	FString Md = FString::Printf(TEXT("Empty amphitheatre, %d rays, R1..R4. Cells: C80 dB / T30 s / EDT s.\n\n| case |"), NumRays);
+	FString Separator = TEXT("|---|");
+	for (const FSolverReceiver& Receiver : Receivers)
+	{
+		Md += FString::Printf(TEXT(" %s |"), *Receiver.Name);
+		Separator += TEXT("---|");
+	}
+	Md += TEXT(" trace, s |\n") + Separator + TEXT("---|\n");
+	for (const FCase& Case : Cases)
+	{
+		FAcousticScene Scene = BaseScene;
+		if (Case.StoneScattering >= 0.0)
+		{
+			for (FAcousticMaterialProps& Material : Scene.Materials)
+			{
+				if (Material.Name.Equals(TEXT("Stone"), ESearchCase::IgnoreCase))
+				{
+					for (int32 Band = 0; Band < Acoustics::NumBands; ++Band)
+					{
+						Material.Scattering[Band] = Case.StoneScattering;
+					}
+				}
+			}
+		}
+		FRayTracerSettings Settings;
+		Settings.NumRays = NumRays;
+		Settings.Seed = 1;
+		Settings.MaxOrder = Case.MaxOrder;
+		Settings.MaxTimeSeconds = Case.TMax;
+		Settings.MaxPathsForVisualization = 0;
+		const FSimulationResult Result = FRayTracer::Run(Scene, Source, Receivers, Settings);
+		Md += FString::Printf(TEXT("| %s |"), Case.Name);
+		for (int32 R = 0; R < Result.Receivers.Num(); ++R)
+		{
+			const FBandMetrics& Band = Result.Receivers[R].Metrics.Band(0);
+			Md += FString::Printf(TEXT(" %.1f / %s / %.2f |"), Band.C80, *Num(Band.T30, Band.bT30Valid, 2), Band.EDT);
+			Csv += FString::Printf(TEXT("%s,%s,%d,%.1f,%.2f,%.2f,%.3f,%d,%.3f,%.3f,%.2f\n"), *FString(Case.Name).Replace(TEXT(","), TEXT(";")), *Receivers[R].Name, Case.MaxOrder, Case.TMax,
+				Case.StoneScattering < 0.0 ? 0.2 : Case.StoneScattering, Band.C80, Band.T30, Band.bT30Valid ? 1 : 0, Band.T20, Band.EDT, Result.Timing.TotalSeconds);
+			// Where the energy arrives (relative to the direct sound): explains a C80 / D50 without a measurable decay.
+			const FReceiverResult& Receiver = Result.Receivers[R];
+			const FEnergyHistogram& H = Receiver.Histogram;
+			const double Total = FMath::Max(H.TotalEnergy(0), 1e-30);
+			const double Windows[] = { 0.0, 0.05, 0.08, 0.2, 0.5, 1.0, 2.0, 1.0e9 };
+			FString Shares;
+			for (int32 W = 0; W + 1 < UE_ARRAY_COUNT(Windows); ++W)
+			{
+				const int32 First = FMath::Clamp(H.BinIndex(Receiver.DirectArrivalSeconds + Windows[W]), 0, H.NumBins);
+				const int32 End = Windows[W + 1] > 100.0 ? H.NumBins : FMath::Clamp(H.BinIndex(Receiver.DirectArrivalSeconds + Windows[W + 1]), 0, H.NumBins);
+				Shares += FString::Printf(TEXT(" %.0f-%.0f ms %.1f %%;"), Windows[W] * 1000.0, FMath::Min(Windows[W + 1], 99.0) * 1000.0, 100.0 * H.SumRange(First, End, 0) / Total);
+			}
+			UE_LOG(LogAcoustics, Display, TEXT("E5b: %s %s: direct %.3g of %.3g (%.1f %%), hits %lld, last bin %d:%s"), Case.Name, *Receiver.Name, Receiver.DirectEnergy, Total,
+				100.0 * Receiver.DirectEnergy / Total, Receiver.NumRayHits, H.LastNonEmptyBin(0), *Shares);
+		}
+		Md += FString::Printf(TEXT(" %.1f |\n"), Result.Timing.TotalSeconds);
+		UE_LOG(LogAcoustics, Display, TEXT("E5b: %s: %.1f s"), Case.Name, Result.Timing.TotalSeconds);
+	}
+	OutCsvPath = ExperimentDir() / TEXT("E5b_empty_decay.csv");
+	FFileHelper::SaveStringToFile(Csv, *OutCsvPath);
+	return Md;
 }

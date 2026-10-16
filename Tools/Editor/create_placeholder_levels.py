@@ -17,7 +17,7 @@ TEMPLATE_MAP = "/Engine/Maps/Templates/Template_Default"
 LEVELS = [
     ("Level_MainMenu", "MAIN_MENU", "Main menu"),
     ("Level_Shoebox", "SHOEBOX", "Shoebox 10 x 7 x 3 m validation room (geometry comes in M1)"),
-    ("Level_Amphitheatre", "AMPHITHEATRE", "Elliptical amphitheatre (Geometry Script build comes in M10)"),
+    ("Level_Amphitheatre", "AMPHITHEATRE", "Elliptical amphitheatre: 20 stepped rows, audience / velarium toggles; menu 1.5 = soundwalk"),
     ("Level_Refraction", "REFRACTION", "Pool and acoustic lens, beam tracing with refraction (M6)"),
     ("Level_Amphitheatre_SteamAudio", "INDUSTRY_STEAM_AUDIO", "Amphitheatre with Steam Audio (M9)"),
     ("Level_Amphitheatre_AudioTracing", "INDUSTRY_AUDIO_TRACING", "Amphitheatre with Audio Tracing (M9)"),

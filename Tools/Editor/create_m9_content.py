@@ -23,7 +23,8 @@ Phases (default: all, in this order): assets, amphitheatre, steam, tracing.
 
 Keys 5 / 6 switch between the plugins at runtime in both levels (AIndustryAudioActor::HandleVariantKeyInWorld).
 
-Rerun after M10 replaces the amphitheatre geometry: the industry levels are rebuilt from Level_Amphitheatre.
+Rerun after a change of Level_Amphitheatre: the industry levels are rebuilt from it (M10: the AAmphitheatreActor is baked
+into static mesh actors, see bake_amphitheatre; run create_m10_polish.py first).
 Existing assets are reused and their settings re-applied.
 """
 import sys
@@ -43,6 +44,7 @@ POSITIONS = "/Game/Acoustics/DA_AmphitheatrePositions"
 INDUSTRY = "/Game/Industry"
 STEAM_FOLDER = f"{INDUSTRY}/SteamAudio"
 TRACING_FOLDER = f"{INDUSTRY}/AudioTracing"
+MESH_FOLDER = f"{INDUSTRY}/Meshes"
 CLIP_SOURCE = "/Game/Audio/Anechoic/A_Anechoic_TestSignal"
 CLIP_MASTER = f"{INDUSTRY}/A_Anechoic_TestSignal_Master"
 CLICK = f"{INDUSTRY}/A_Click_48k"  # Saved/Audio/A_Click_48k.wav from Tools/Audio/make_click.py
@@ -55,6 +57,7 @@ PRESETS = {
     "Audience": (0.70, 0.60),
     "WaterSurface": (0.01, 0.05),
     "Absorber": (0.90, 0.20),
+    "Stone": (0.02, 0.20),  # M10: the amphitheatre rows and arena
 }
 # Broadband transmission through a wall (Steam Audio needs a value; ours has none): almost opaque.
 TRANSMISSION = 0.01
@@ -280,6 +283,51 @@ def copy_amphitheatre(target):
     return load_map(target)
 
 
+def bake_amphitheatre():
+    """M10: Steam Audio exports only static meshes of AStaticMeshActors (SteamAudioScene.cpp, GetActorsForStaticGeometryExport),
+    so the industry copy replaces the AAmphitheatreActor (dynamic meshes) by static mesh actors of the same triangles and
+    tags: /Game/Industry/Meshes/SM_Amphitheatre_<part> (Allow CPU Access for our extractor). The audience / velarium
+    toggles are therefore not available in the industry levels (empty stone amphitheatre, the reference condition)."""
+    found = [a for a in actors.get_all_level_actors() if a.get_class().get_name() == "AmphitheatreActor"]
+    if not found:
+        return 0
+    amphitheatre = found[0]
+    amphitheatre.rebuild()
+    asset_library.make_directory(MESH_FOLDER)
+    count = 0
+    for component_name, part in (("arena_floor", "Floor"), ("cavea", "Cavea"), ("velarium", "Velarium")):
+        component = amphitheatre.get_editor_property(component_name)
+        tags = [str(tag) for tag in component.get_editor_property("component_tags")]
+        if "Acoustic" not in tags:
+            continue
+        mesh_path = f"{MESH_FOLDER}/SM_Amphitheatre_{part}"
+        if asset_library.does_asset_exist(mesh_path):
+            mesh = asset_library.load_asset(mesh_path)  # the builder is deterministic: the same triangles as before
+        else:
+            options = unreal.GeometryScriptCreateNewStaticMeshAssetOptions()
+            options.set_editor_property("enable_recompute_normals", True)
+            options.set_editor_property("enable_collision", True)
+            options.set_editor_property("collision_mode", unreal.CollisionTraceFlag.CTF_USE_COMPLEX_AS_SIMPLE)
+            mesh, outcome = unreal.GeometryScript_NewAssetUtils.create_new_static_mesh_asset_from_mesh(component.get_dynamic_mesh(), mesh_path, options)
+            if mesh is None:
+                raise RuntimeError(f"could not create {mesh_path} ({outcome})")
+            log(f"created {mesh_path}")
+        mesh.set_editor_property("allow_cpu_access", True)
+        save(mesh)
+        actor = spawn("/Script/Engine.StaticMeshActor", f"Amphitheatre{part}")
+        static = actor.get_editor_property("static_mesh_component")
+        static.set_static_mesh(mesh)
+        static.set_editor_property("component_tags", tags)
+        render = amphitheatre.get_editor_property("stone_render_material")
+        if render:
+            static.set_material(0, render)
+        actor.set_actor_location(amphitheatre.get_actor_location(), False, False)
+        count += 1
+    actors.destroy_actor(amphitheatre)
+    log(f"amphitheatre baked into {count} static mesh actors")
+    return count
+
+
 def spec(class_path, properties=None):
     result = unreal.IndustryComponentSpec()
     result.set_editor_property("component_class", unreal.SoftClassPath(class_path))
@@ -355,6 +403,7 @@ def setup_industry_level(target, kind, display_name, own_plugin):
         return
     copy_amphitheatre(target)
     configure_setup(kind, display_name)
+    bake_amphitheatre()
     level_name = target.rsplit("/", 1)[-1]
     add_steam_actor(level_name, own_plugin == "steam")
     add_tracing_actor(level_name, own_plugin == "tracing")

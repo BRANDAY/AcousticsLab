@@ -1,0 +1,18 @@
+# AcousticsLab beam-tracer benchmark (M7), 2026-10-16 13:31:52
+# scene: Level_Amphitheatre, source S1; 8160 triangles (surface split 1); 4 receivers; subdivision level 2 (320 root beams); max beam order 2; refraction off
+# machine: Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz; 6 physical / 12 logical cores; 15.9 GB RAM, 1.7 GB available at start
+# note: headless python commandlet (-NullRHI), editor closed, plan amphitheatre2
+# 2 repetitions, wall time 215.0 s, all results identical: yes
+threads,bvh,repetition,total_s,build_s,query_s,nodes,fingerprint,identical
+1,on,1,49.294942,49.156949,0.137992,1214016,528569dae047f042,yes
+2,on,1,22.235826,22.136438,0.099388,1214016,528569dae047f042,yes
+4,on,1,11.957692,11.910595,0.047097,1214016,528569dae047f042,yes
+6,on,1,10.495873,10.461846,0.034025,1214016,528569dae047f042,yes
+8,on,1,9.245972,9.209347,0.036623,1214016,528569dae047f042,yes
+12,on,1,8.345353,8.306662,0.038690,1214016,528569dae047f042,yes
+1,on,2,27.801998,27.652895,0.149102,1214016,528569dae047f042,yes
+2,on,2,16.250319,16.186981,0.063337,1214016,528569dae047f042,yes
+4,on,2,15.331741,15.258405,0.073336,1214016,528569dae047f042,yes
+6,on,2,10.098293,10.065217,0.033075,1214016,528569dae047f042,yes
+8,on,2,9.846978,9.792247,0.054731,1214016,528569dae047f042,yes
+12,on,2,11.170128,11.097039,0.073087,1214016,528569dae047f042,yes
