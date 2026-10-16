@@ -78,6 +78,8 @@ The camera is a flying first-person pawn (6 m/s, collides with the walls). The t
 
 Top right: settings, run control and results; bottom left: the impulse-response plot. Everything is built in C++ (UMG).
 
+> **Known issue in the current build (16.10.2026):** the panel does not show its settings rows — the **Solver** and **Source** combos and the fields (Rays, Max order, Beams: subdivision, refraction checkbox, Hybrid K / t_mix …). The widget builds them only while it has no input fields yet, and the visualization's "Order <=" field is created first (`SimulationHUDWidget.cpp`). Until it is fixed, choose the solver and its settings on the `SimulationManager` actor in the editor (Details → `Solver`, `Settings`, `Source Id`) before **Play**; **Run**, the receiver selector, the metrics, the visualization and auralization blocks work. The benchmark panel (B) and the comparison panel (H, with its own K / t_mix / Rays / Beam subdiv fields) are not affected.
+
 | Block | Controls | Details |
 |---|---|---|
 | Header | `Simulation: <solver>`, status (`Idle`, `Extracting scene...`, `Running N % (t s)`, `Finished: Done in t s`, `Cancelled`, `Failed`), progress bar | |

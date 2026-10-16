@@ -69,7 +69,11 @@ Bottom-left panel, "Impulse response: energy (thin) and Schroeder decay (thick)"
 - markers: horizontal lines at −5 and −35 dB (the T30 fit range), vertical lines at direct arrival + 50 ms and + 80 ms (the C50/C80 limits);
 - legend per curve: receiver, T30, C80.
 
-Three curve slots: slot 0 (light cyan) is always the selected receiver; **Pin** copies it into slot 1 (orange), then slot 2 (green), alternating; **Clear** empties the pinned slots. Pin R1, switch to R3 or change the wall absorption and run again to compare two decays on one plot. (The hybrid comparison of M8 will use the same three slots for ray / beam / hybrid.)
+Three curve slots: slot 0 (light cyan) is always the selected receiver; **Pin** copies it into slot 1 (orange), then slot 2 (green), alternating; **Clear** empties the pinned slots. Pin R1, switch to R3 or change the wall absorption and run again to compare two decays on one plot. (The comparison panel of M8 uses the same plot widget for pure ray / pure beam / hybrid, [10](10-hybrid.md).)
+
+![IR plot: live R3 and pinned R1](img/ir_plot_pinned.png)
+
+*Ray tracer in the concrete shoebox: R1 pinned (orange, T30 4.72 s, C80 −5.8 dB), then R3 selected (cyan, 1 m from the source: T30 4.73 s, C80 −3.2 dB) — the same decay rate, a stronger direct part; −5 / −35 dB fit lines.*
 
 ## Panel: the "Visualization" block
 

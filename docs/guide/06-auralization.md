@@ -68,6 +68,10 @@ Keys 5 and 6 stop the bench's convolution clip and play the plugin source; 1–4
 
 The receiver selector `<` / `>` at the top of the panel selects the receiver whose response is heard.
 
+![Auralization block after a beam run and a ray run](img/auralization_block.png)
+
+*After a beam run and a ray run: `2: Ray` and `3: Beam` are available (`4: Hybrid` greyed — no hybrid run yet), Dry playing; the status lines give the receiver, the cached responses, the IR (4.521 s, cut at −60 dB, peak −3 dBFS, normalization −21.7 dB) and the WAV path.*
+
 Component properties (Details panel of `SimulationManager → Auralization`): anechoic clip, submix and preset references, sample rate, seed, peak dBFS, −60 dB truncation level, extra gain, WAV export on/off and format, auto-play on result, loop gap, clip volume.
 
 Console commands (PIE, `~` console): `Acoustics.Run`, `Acoustics.Auralization.Variant 1|2|3`, `Acoustics.Auralization.Receiver R3|<index>`, `Acoustics.Auralization.Play`, `Acoustics.Auralization.Stop`.

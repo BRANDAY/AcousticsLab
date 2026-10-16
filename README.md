@@ -70,7 +70,7 @@ or in the editor: Tools → Session Frontend → Automation → filter `Acoustic
 
 **Run**: open `AcousticsLab.uproject`; it starts in `Level_MainMenu`. Use **Play → Standalone Game** for the menu (in PIE the editor takes Esc). To work on one scene, open `Content/Maps/Level_Shoebox` or `Level_Refraction` and press Play.
 
-**In a scene**: the simulation panel is top right (cursor mode), the impulse-response plot bottom left. **Run** starts the selected solver, **Stop** cancels it; `<` / `>` select the receiver; **Tab** toggles cursor / fly (WASD + mouse, E/Q up/down); **1 / 2 / 3 / 4** play the dry clip / the ray-traced / beam-traced / hybrid room; **H** toggles the comparison panel (hybrid), **B** the benchmark panel; **5 / 6** switch to Steam Audio / Audio Tracing in the industry levels; **Esc** returns to the menu. Details: [overview and controls](docs/guide/01-overview-and-controls.md).
+**In a scene**: the simulation panel is top right (cursor mode), the impulse-response plot bottom left. **Run** starts the selected solver, **Stop** cancels it; `<` / `>` select the receiver; **Tab** toggles cursor / fly (WASD + mouse, E/Q up/down); **1 / 2 / 3 / 4** play the dry clip / the ray-traced / beam-traced / hybrid room; **H** toggles the comparison panel (hybrid), **B** the benchmark panel; **5 / 6** switch to Steam Audio / Audio Tracing in the industry levels; **Esc** returns to the menu. *Known issue in the current build: the panel's Solver selector and settings fields are not shown; choose the solver on the `SimulationManager` actor in the editor before Play ([details](docs/guide/01-overview-and-controls.md#the-simulation-panel)).* Details: [overview and controls](docs/guide/01-overview-and-controls.md).
 
 The menu:
 

@@ -4,7 +4,9 @@
 
 A guided tour of what the bench shows today (milestones M0–M10), in the order a reviewer would want to see it. Each step names what to press, what to look at, and where the details are. Times are on the development machine (10 worker threads).
 
-**Before you start:** open `AcousticsLab.uproject` in Unreal Engine 5.8.3 (build instructions in the [README](../../README.md#quick-start)). Headphones help in step 5. Keys: **Tab** switches between the panel (cursor) and flying (WASD + mouse, E/Q up/down); **Esc** returns to the menu in Standalone mode.
+**Before you start:** open `AcousticsLab.uproject` in Unreal Engine 5.8.3 (build instructions in the [README](../../README.md#quick-start)). Headphones help in steps 5, 10 and 12. Keys: **Tab** switches between the panel (cursor) and flying (WASD + mouse, E/Q up/down); **Esc** returns to the menu in Standalone mode.
+
+> **Known issue in the current build (16.10.2026), affects steps 4–7:** the simulation panel does not show its settings rows — the **Solver** and **Source** combos and the fields (Rays, Max order, Beams: subdivision, refraction checkbox, Hybrid K / t_mix …). The widget builds them only while it has no input fields yet, and the visualization's "Order <=" field is created first (`SimulationHUDWidget.cpp`). Until it is fixed, choose the solver and its settings on the `SimulationManager` actor in the editor (Details → `Solver`, `Settings`, `Source Id`) before **Play**; **Run**, the receiver selector, the metrics, the visualization and auralization blocks work. The benchmark panel (B) and the comparison panel (H, with its own K / t_mix / Rays / Beam subdiv fields) are not affected.
 
 ---
 
@@ -69,7 +71,7 @@ Esc → **1.2 Beam tracing with refraction**. The level's manager uses the beam 
 3. **Only with receiver**, slider to 3: the beam chains that reach R1 under the water bend at the surface.
 4. The panel note states the one approximation of this mode: the apex of a refracted beam is the least-squares point of its three refracted guide rays (a refracted beam has no exact apex, S2 §3.1.2).
 
-![pool, beams to R1](../milestones/img/M6_pool_receiver.png)
+![pool, beams to R1 seen from the side](img/pool_side.png)
 
 ## 7. Refraction: the acoustic lens of S2 (1.5 min)
 

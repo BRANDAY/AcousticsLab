@@ -65,6 +65,10 @@ Run with the level settings (beam tracer, level 4, order 3): 5120 root beams, 67
 | ![pool, order-1 beams](../milestones/img/M6_pool_refraction.png) | ![pool, beams containing R1](../milestones/img/M6_pool_receiver.png) |
 | Order-1 beams only: yellow = reflected above the water (mostly total internal reflection), cyan = refracted into the water in the cone below the source; the underwater heatmap | Only the beams containing `R1` and their ancestors: the root beam from the source, the refracted beam below the surface (cyan); the polylines bend at the surface |
 
+![pool from the side: the beams to R1 bend at the water surface](img/pool_side.png)
+
+*The same beams seen from outside the pool wall near the water level (captured after M10): the root beam from the source above the water and the refracted beams to `R1` below the surface; the underwater heatmap on the pool floor.*
+
 ## Scene 2: the acoustic lens of S2
 
 In S2 §4.4 the method is validated on an acoustic lens: a rubber sphere of 0.1 m diameter in glycerol, centred 0.75 m from a unidirectional 100 kHz source, traced up to the 4th order and compared with an FEM simulation — both show the primary focus at the back of the sphere (0.7 mm and 1 dB apart) and a weaker secondary focus from two internal reflections; the FEM additionally shows interference and diffraction that the beam method does not model.
