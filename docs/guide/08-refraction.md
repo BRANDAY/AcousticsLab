@@ -87,6 +87,10 @@ Run (Source = `Lens`, subdivision level 6, order 3): 110 of the 81 920 root beam
 
 *Lens scene, all non-escaped beams up to order 3: the glycerol beams of the source cone enter the sphere; inside it the refracted beams converge towards the back; the vertical heatmap shows the level rising along the axis. (In this capture the selected receiver is the pool's R1, which the lens source does not reach — hence the empty metric block and IR plot.)*
 
+![lens scene with R3 selected](img/lens_R3.png)
+
+*Lens scene (subdivision 6: 81 920 root beams, 346 927 beam nodes, 2.7 s), seen from beside the sphere with **R3** selected (7.85 m from the source, near the focus): the beams converge inside the rubber sphere towards its back, the yellow lines are the 212 beam paths that reach R3 ("212 beams contain R3 … 212 refracted arrivals"), and the vertical heatmap through the axis shows the level around the sphere. The source side is to the right, under the panel.*
+
 ## Panel settings (refraction)
 
 | Control | Setting | Default in `Level_Refraction` | Notes |

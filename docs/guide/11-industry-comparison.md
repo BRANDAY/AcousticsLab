@@ -91,6 +91,10 @@ SPEC §5.6, PIE of `Level_Amphitheatre_SteamAudio` (baked cavea, empty stone): a
 
 Reading: **Steam Audio hears the empty amphitheatre as almost dry** (C80 23–32 dB, D50 ≈ 1; its T20 / T30 fits rest on a tail 50–60 dB below the direct sound, and EDT is undefined or absurd at R2–R4). The bench's ray tracer and hybrid hear the late specular echoes of the concave risers ([12, E5b](12-amphitheatre-and-soundwalk.md#e5b--why-the-empty-amphitheatre-has-no-t30)) and give C80 ≈ −2 … −1 dB. The ~25 dB difference is beyond tuning: Steam Audio runs with its default real-time settings (rays, duration, bounces) and its own energy model, and the echoes in the bench's result come from a few specular paths that a coarse stochastic budget does not resolve. The comparison is recorded as measured; the subjective A/B is in the level (keys 5 / 2 / 4). The hybrid's beam tree is truncated at the default budget of 500 000 nodes here (1.21 M needed), so its beam column is incomplete.
 
+![comparison panel with the Steam Audio column](img/compare_table.png)
+
+*The comparison panel (H) in `Level_Amphitheatre_SteamAudio` after a hybrid run and the Steam Audio click measurement (retaken after the M10 follow-up), R1: pure ray / beam ≤ 2 / hybrid against **SteamAud** (EDT 4.77 s, C80 22.65 dB, D50 0.995); **AudioTr** still shows "click" (not measured — no hardware ray tracing here). The split line reports 3 early specular reflections at R1 before t_mix = 80 ms, all found by 100 000 rays.*
+
 ## How to run / listen
 
 1. Main menu → **2.1 Steam Audio** (or open `Level_Amphitheatre_SteamAudio` and Play). With headphones: the anechoic test signal from the arena centre, binaural, in the empty stone cavea.

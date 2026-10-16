@@ -79,7 +79,7 @@ Esc → **1.2 Beam tracing with refraction**. The level's manager uses the beam 
 2. Fly 60 m along +Y (Tab, then WASD) to the lens: the beams enter the sphere and converge towards its back; the vertical heatmap through the axis shows the focal spot inside the back half of the sphere, where the ball-lens formula $nR/(2(n-1)) \approx 0.47$ m puts it.
 3. The test `LensFocus` requires the focus receiver to get more than twice the energy of receivers 0.3 m off the axis.
 
-![lens focus](../milestones/img/M6_lens_focus.png)
+![lens with R3 selected: beams converging inside the sphere](img/lens_R3.png)
 
 Details: [8. refraction](08-refraction.md).
 
